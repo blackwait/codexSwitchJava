@@ -1,0 +1,211 @@
+.root {
+    -fx-font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+    -fx-text-fill: #2f2743;
+    -fx-font-smoothing-type: lcd;
+}
+
+.app-root {
+    -fx-background-color: linear-gradient(to bottom right, #efa4d1 0%, #e7a6db 42%, #c3b2ff 76%, #a7d5ff 100%);
+    -fx-padding: 16;
+}
+
+.shell-root {
+    -fx-background-color: transparent;
+}
+
+.nav-pane {
+    -fx-pref-width: 136;
+    -fx-min-width: 136;
+    -fx-max-width: 136;
+    -fx-spacing: 7;
+    -fx-padding: 14 0 0 0;
+}
+
+.content-stack {
+    -fx-background-color: transparent;
+}
+
+.scroll-pane,
+.scroll-pane > .viewport {
+    -fx-background-color: transparent;
+}
+
+.page-root {
+    -fx-spacing: 12;
+    -fx-padding: 1 2 18 2;
+}
+
+.page-title {
+    -fx-font-size: 19px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #40395a;
+    -fx-padding: 0 0 4 0;
+}
+
+.nav-button {
+    -fx-background-color: rgba(255,255,255,0.4);
+    -fx-border-color: #6e78ff;
+    -fx-border-width: 1;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-text-fill: #5f52cf;
+    -fx-font-size: 13.5px;
+    -fx-font-weight: 700;
+    -fx-padding: 8 12;
+    -fx-cursor: hand;
+    -fx-pref-height: 35;
+}
+
+.nav-button:hover {
+    -fx-background-color: rgba(255,255,255,0.58);
+}
+
+.nav-button:selected,
+.nav-button.active {
+    -fx-background-color: rgba(255,255,255,0.88);
+    -fx-border-color: #6f74ff;
+    -fx-text-fill: #4f46c6;
+}
+
+.card {
+    -fx-background-color: rgba(255,255,255,0.56);
+    -fx-background-radius: 12;
+    -fx-border-color: rgba(255,255,255,0.96);
+    -fx-border-width: 1.1;
+    -fx-border-radius: 12;
+    -fx-padding: 15 16 15 16;
+    -fx-spacing: 10;
+    -fx-effect: dropshadow(gaussian, rgba(140, 110, 200, 0.16), 16, 0.14, 0, 3);
+}
+
+.card-title {
+    -fx-font-size: 13px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #6f6b82;
+}
+
+.button,
+.primary-button {
+    -fx-background-color: rgba(255,255,255,0.7);
+    -fx-border-color: #6e78ff;
+    -fx-border-width: 1;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-text-fill: #5d52ca;
+    -fx-font-weight: 700;
+    -fx-padding: 6 14;
+    -fx-cursor: hand;
+}
+
+.button:hover,
+.primary-button:hover {
+    -fx-background-color: rgba(255,255,255,0.86);
+}
+
+.button:pressed,
+.primary-button:pressed {
+    -fx-background-color: rgba(240, 239, 255, 0.95);
+}
+
+.label {
+    -fx-text-fill: #312a44;
+}
+
+.text-field,
+.password-field,
+.combo-box,
+.spinner,
+.date-picker,
+.text-area,
+.list-view,
+.table-view {
+    -fx-background-color: rgba(255,255,255,0.93);
+    -fx-background-radius: 8;
+    -fx-border-color: #d6d3ec;
+    -fx-border-radius: 8;
+    -fx-border-width: 1;
+}
+
+.text-field,
+.password-field,
+.combo-box,
+.spinner,
+.date-picker {
+    -fx-pref-height: 34;
+}
+
+.text-field:focused,
+.password-field:focused,
+.combo-box:focused,
+.spinner:focused,
+.date-picker:focused,
+.text-area:focused,
+.list-view:focused,
+.table-view:focused {
+    -fx-border-color: #6f74ff;
+    -fx-border-width: 1.2;
+}
+
+.text-area .content,
+.list-view .virtual-flow,
+.table-view .virtual-flow {
+    -fx-background-color: rgba(255,255,255,0.93);
+    -fx-background-radius: 8;
+}
+
+.combo-box .list-cell,
+.list-cell {
+    -fx-text-fill: #2f2743;
+}
+
+.table-view .column-header-background {
+    -fx-background-color: rgba(255,255,255,0.72);
+    -fx-background-radius: 8 8 0 0;
+}
+
+.table-view .column-header,
+.table-view .filler {
+    -fx-background-color: transparent;
+    -fx-border-color: #d9d7ef;
+}
+
+.table-row-cell {
+    -fx-background-color: rgba(255,255,255,0.76);
+    -fx-border-color: rgba(230,228,244,0.6);
+    -fx-cell-size: 34px;
+}
+
+.table-row-cell:selected,
+.list-cell:selected {
+    -fx-background-color: rgba(111,116,255,0.18);
+}
+
+.scroll-pane > .corner {
+    -fx-background-color: transparent;
+}
+
+.check-box,
+.radio-button {
+    -fx-text-fill: #312a44;
+}
+
+.status-muted {
+    -fx-text-fill: #76728a;
+}
+
+.status-ok {
+    -fx-text-fill: #1a9a65;
+}
+
+.status-error {
+    -fx-text-fill: #d44c5d;
+}
+
+.badge {
+    -fx-background-color: #ff4d4f;
+    -fx-background-radius: 8;
+    -fx-text-fill: white;
+    -fx-font-size: 10px;
+    -fx-font-weight: 700;
+    -fx-padding: 2 6;
+}

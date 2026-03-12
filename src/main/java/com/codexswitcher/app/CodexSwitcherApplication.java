@@ -1,0 +1,49 @@
+package com.codexswitcher.app;
+
+import com.codexswitcher.service.AppServices;
+import com.codexswitcher.ui.MainView;
+import javafx.application.Application;
+import javafx.scene.Scene;
+import javafx.scene.image.Image;
+import javafx.stage.Stage;
+
+import java.io.InputStream;
+
+public class CodexSwitcherApplication extends Application {
+
+    private MainView mainView;
+
+    @Override
+    public void start(Stage stage) {
+        AppState state = new AppState();
+        AppServices services = new AppServices();
+        state.setActiveAccount(services.store().getActiveAccount());
+        state.setVscodeInstallDir(services.store().loadVscodeInstallDir());
+
+        mainView = new MainView(state, services);
+        Scene scene = new Scene(mainView, 1120, 780);
+        scene.getStylesheets().add(getClass().getResource("/css/app.css").toExternalForm());
+        stage.setTitle("Codex Switcher");
+        stage.setMinWidth(1020);
+        stage.setMinHeight(700);
+        try (InputStream input = getClass().getResourceAsStream("/assets/icon_tray.png")) {
+            if (input != null) {
+                stage.getIcons().add(new Image(input));
+            }
+        } catch (Exception ignored) {
+        }
+        stage.setScene(scene);
+        stage.show();
+    }
+
+    @Override
+    public void stop() {
+        if (mainView != null) {
+            mainView.shutdown();
+        }
+    }
+
+    public static void main(String[] args) {
+        launch(args);
+    }
+}
