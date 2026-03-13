@@ -79,12 +79,13 @@ public class VscodePage extends PagePane {
             Ui.row(scanButton, chooseIndex, openButton, disableUpdate),
             Ui.card("插件信息", Ui.row(new Label("插件目录"), extensionBox), extensionPathLabel, extensionVersionLabel, latestVersionLabel, indexPathLabel),
             Ui.card("增加可用模型", Ui.row(new Label("模型名称"), modelsField), Ui.row(patchButton, restoreButton), statusLabel),
-            Ui.card("提示", new Label("会自动备份 index-*.js；核心补丁包括 allowlist、API Key filter、模型顺序注入和 initial data。"))
+            Ui.card("提示", new Label("会自动备份 index-*.js；旧版扩展走 allowlist 补丁，新版扩展会自动注入运行时模型列表。"))
         );
     }
 
     @Override
     public void onShow() {
+        detectInstallDirIfNeeded();
         installField.setText(installDir == null ? "" : installDir.toString());
         workspaceField.setText(workspaceDir == null ? "" : workspaceDir.toString());
         scanExtensions();
@@ -97,13 +98,9 @@ public class VscodePage extends PagePane {
         }
         var file = chooser.showDialog(getScene().getWindow());
         if (file != null) {
-            installDir = file.toPath();
-            context.state().setVscodeInstallDir(installDir);
-            installField.setText(installDir.toString());
-            try {
-                context.services().store().saveVscodeInstallDir(installDir);
-            } catch (Exception ignored) {
-            }
+            installDir = context.services().vscode().normalizeInstallDir(file.toPath());
+            persistInstallDir();
+            installField.setText(installDir == null ? "" : installDir.toString());
             scanExtensions();
         }
     }
@@ -205,6 +202,26 @@ public class VscodePage extends PagePane {
             statusLabel.setText("已恢复备份：" + context.services().vscode().restoreLatestBackup(indexPath));
         } catch (Exception e) {
             Ui.error("失败", e.getMessage());
+        }
+    }
+
+    private void detectInstallDirIfNeeded() {
+        if (installDir != null && installDir.toFile().exists()) {
+            return;
+        }
+        Path detected = context.services().vscode().detectVscodeInstallDir(context.services().codex());
+        if (detected == null) {
+            return;
+        }
+        installDir = detected;
+        persistInstallDir();
+    }
+
+    private void persistInstallDir() {
+        context.state().setVscodeInstallDir(installDir);
+        try {
+            context.services().store().saveVscodeInstallDir(installDir);
+        } catch (Exception ignored) {
         }
     }
 }

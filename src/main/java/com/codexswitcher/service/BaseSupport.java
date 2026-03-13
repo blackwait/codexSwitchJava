@@ -168,7 +168,6 @@ public abstract class BaseSupport {
             builder.directory(cwd.toFile());
         }
         builder.environment().putAll(env);
-        builder.redirectInput(ProcessBuilder.Redirect.DISCARD);
         builder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
         builder.redirectError(ProcessBuilder.Redirect.DISCARD);
         builder.start();

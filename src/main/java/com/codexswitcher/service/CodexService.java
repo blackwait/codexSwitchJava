@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -27,7 +28,9 @@ public class CodexService extends BaseSupport {
             ? List.of("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", executable, "--version")
             : List.of(executable, "--version");
         try {
-            Process process = new ProcessBuilder(command).start();
+            ProcessBuilder builder = new ProcessBuilder(command);
+            builder.environment().putAll(buildCommandEnvironment());
+            Process process = builder.start();
             process.waitFor(5, TimeUnit.SECONDS);
             String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
             String error = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
@@ -39,6 +42,10 @@ public class CodexService extends BaseSupport {
     }
 
     public VersionInfo getLatestVersion() {
+        VersionInfo npmInfo = fetchLatestVersionFromNpm();
+        if (npmInfo.ok && !isBlank(npmInfo.version)) {
+            return npmInfo;
+        }
         try {
             var request = java.net.http.HttpRequest.newBuilder(java.net.URI.create("https://api.github.com/repos/openai/codex/releases/latest"))
                 .header("User-Agent", "CodexSwitcher")
@@ -47,10 +54,14 @@ public class CodexService extends BaseSupport {
             var response = HTTP.send(request, java.net.http.HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             var data = JSON.readValue(response.body(), new com.fasterxml.jackson.core.type.TypeReference<java.util.LinkedHashMap<String, Object>>() {
             });
-            String tag = firstNonBlank(String.valueOf(data.get("tag_name")), String.valueOf(data.get("name")), "-");
-            return new VersionInfo(true, firstNonBlank(extractSemver(tag), tag, "-"), "", "");
+            String tag = firstMeaningful(String.valueOf(data.get("tag_name")), String.valueOf(data.get("name")));
+            if (!isBlank(tag)) {
+                return new VersionInfo(true, firstNonBlank(extractSemver(tag), tag, "-"), "", "");
+            }
+            String message = firstMeaningful(String.valueOf(data.get("message")), String.valueOf(data.get("documentation_url")));
+            return new VersionInfo(false, "-", "", firstNonBlank(message, npmInfo.message, "未获取到版本信息"));
         } catch (Exception e) {
-            return new VersionInfo(false, "-", "", e.getMessage());
+            return new VersionInfo(false, "-", "", firstNonBlank(npmInfo.message, e.getMessage()));
         }
     }
 
@@ -257,5 +268,57 @@ public class CodexService extends BaseSupport {
 
     private List<String> commandSuffixes(String commandName) {
         return commandName.contains(".") ? List.of("") : commandSuffixes();
+    }
+
+    public Map<String, String> buildCommandEnvironment() {
+        LinkedHashMap<String, String> env = new LinkedHashMap<>();
+        String separator = java.io.File.pathSeparator;
+        List<String> mergedPath = new ArrayList<>();
+        for (Path path : buildSearchPaths()) {
+            String value = path.toString();
+            if (!mergedPath.contains(value)) {
+                mergedPath.add(value);
+            }
+        }
+        for (String value : pathEntries()) {
+            if (!mergedPath.contains(value)) {
+                mergedPath.add(value);
+            }
+        }
+        env.put("PATH", String.join(separator, mergedPath));
+        return env;
+    }
+
+    private VersionInfo fetchLatestVersionFromNpm() {
+        try {
+            var request = java.net.http.HttpRequest.newBuilder(java.net.URI.create("https://registry.npmjs.org/@openai%2Fcodex/latest"))
+                .header("User-Agent", "CodexSwitcher")
+                .timeout(java.time.Duration.ofSeconds(6))
+                .build();
+            var response = HTTP.send(request, java.net.http.HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            var data = JSON.readValue(response.body(), new com.fasterxml.jackson.core.type.TypeReference<java.util.LinkedHashMap<String, Object>>() {
+            });
+            String version = firstMeaningful(String.valueOf(data.get("version")), String.valueOf(data.get("dist-tags")));
+            if (!isBlank(version)) {
+                return new VersionInfo(true, version, "", "");
+            }
+            return new VersionInfo(false, "-", "", firstMeaningful(String.valueOf(data.get("error")), String.valueOf(data.get("message"))));
+        } catch (Exception e) {
+            return new VersionInfo(false, "-", "", e.getMessage());
+        }
+    }
+
+    private String firstMeaningful(String... values) {
+        for (String value : values) {
+            if (isBlank(value)) {
+                continue;
+            }
+            String normalized = value.trim();
+            if ("null".equalsIgnoreCase(normalized) || "undefined".equalsIgnoreCase(normalized)) {
+                continue;
+            }
+            return normalized;
+        }
+        return "";
     }
 }

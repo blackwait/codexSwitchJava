@@ -42,8 +42,7 @@ public class StoreService extends BaseSupport {
     }
 
     public void saveStoreNode(ObjectNode node) throws IOException {
-        ensureParent(PROFILE_STORE);
-        JSON.writeValue(PROFILE_STORE.toFile(), node);
+        writeJson(PROFILE_STORE, node);
         Files.writeString(PROFILE_STORE, System.lineSeparator(), StandardCharsets.UTF_8, StandardOpenOption.APPEND);
     }
 
@@ -211,6 +210,7 @@ public class StoreService extends BaseSupport {
             data.put("OPENAI_ORG_ID", orgId);
         }
         writeJson(AUTH_PATH, data);
+        verifyWritable(AUTH_PATH);
         Files.writeString(AUTH_PATH, System.lineSeparator(), StandardCharsets.UTF_8, StandardOpenOption.APPEND);
     }
 

@@ -131,10 +131,14 @@ public class OpencodeService extends BaseSupport {
                 continue;
             }
             try {
-                Process process = new ProcessBuilder(executable, "--version").start();
+                ProcessBuilder builder = new ProcessBuilder(executable, "--version");
+                builder.environment().putAll(codexService.buildCommandEnvironment());
+                Process process = builder.start();
                 process.waitFor(4, java.util.concurrent.TimeUnit.SECONDS);
                 String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-                return new VersionInfo(true, firstNonBlank(extractSemver(output), output, "未知"), executable, "");
+                String error = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+                String merged = firstNonBlank(output, error);
+                return new VersionInfo(true, firstNonBlank(extractSemver(merged), merged, "未知"), executable, error);
             } catch (Exception ignored) {
             }
         }
