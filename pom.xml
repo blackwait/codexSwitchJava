@@ -13,6 +13,7 @@
         <maven.compiler.release>21</maven.compiler.release>
         <javafx.version>21.0.5</javafx.version>
         <javafx.platform>win</javafx.platform>
+        <javafx.cache.dir>/tmp/CodexSwitcher-javafx-cache</javafx.cache.dir>
         <jackson.version>2.18.2</jackson.version>
         <main.class>com.codexswitcher.app.Launcher</main.class>
     </properties>
@@ -92,6 +93,10 @@
                 <version>0.0.8</version>
                 <configuration>
                     <mainClass>${main.class}</mainClass>
+                    <options>
+                        <option>--enable-native-access=ALL-UNNAMED</option>
+                        <option>-Djavafx.cachedir=${javafx.cache.dir}</option>
+                    </options>
                 </configuration>
             </plugin>
             <plugin>

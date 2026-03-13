@@ -316,9 +316,14 @@ public class NetworkService extends BaseSupport {
     }
 
     private Long pingOnce(String host) {
-        List<String> command = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")
-            ? List.of("ping", "-n", "1", "-w", "1000", host)
-            : List.of("ping", "-c", "1", "-W", "1", host);
+        List<String> command;
+        if (isWindows()) {
+            command = List.of("ping", "-n", "1", "-w", "1000", host);
+        } else if (isMac()) {
+            command = List.of("ping", "-c", "1", host);
+        } else {
+            command = List.of("ping", "-c", "1", "-W", "1", host);
+        }
         String output = runAndRead(command, 5);
         Matcher matcher = PING_REGEX.matcher(output);
         if (matcher.find()) {

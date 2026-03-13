@@ -13,6 +13,7 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
@@ -26,6 +27,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -76,6 +78,7 @@ public abstract class BaseSupport {
         Path parent = path.getParent();
         if (parent != null) {
             Files.createDirectories(parent);
+            ensureWritable(parent);
         }
     }
 
@@ -85,6 +88,8 @@ public abstract class BaseSupport {
 
     public static void writeText(Path path, String text) throws IOException {
         ensureParent(path);
+        ensureWritable(path);
+        verifyWritable(path);
         Files.writeString(path, text, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
     }
 
@@ -102,6 +107,8 @@ public abstract class BaseSupport {
 
     public static void writeJson(Path path, Object value) throws IOException {
         ensureParent(path);
+        ensureWritable(path);
+        verifyWritable(path);
         JSON.writeValue(path.toFile(), value);
     }
 
@@ -110,9 +117,30 @@ public abstract class BaseSupport {
         return noBlock.replaceAll("(?m)//.*$", "");
     }
 
+    public static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+    }
+
+    public static boolean isMac() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("mac");
+    }
+
+    public static boolean isLinux() {
+        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        return os.contains("nix") || os.contains("nux") || os.contains("linux");
+    }
+
     public static void openPath(Path path) throws IOException {
         if (Desktop.isDesktopSupported()) {
             Desktop.getDesktop().open(path.toFile());
+            return;
+        }
+        if (isMac()) {
+            startDetached(List.of("open", path.toAbsolutePath().toString()), null, Map.of());
+            return;
+        }
+        if (isLinux()) {
+            startDetached(List.of("xdg-open", path.toAbsolutePath().toString()), null, Map.of());
             return;
         }
         startDetached(List.of("explorer.exe", path.toAbsolutePath().toString()), null, Map.of());
@@ -121,6 +149,14 @@ public abstract class BaseSupport {
     public static void openUrl(String url) throws IOException {
         if (Desktop.isDesktopSupported()) {
             Desktop.getDesktop().browse(URI.create(url));
+            return;
+        }
+        if (isMac()) {
+            startDetached(List.of("open", url), null, Map.of());
+            return;
+        }
+        if (isLinux()) {
+            startDetached(List.of("xdg-open", url), null, Map.of());
             return;
         }
         startDetached(List.of("cmd.exe", "/c", "start", "", url), null, Map.of());
@@ -132,7 +168,35 @@ public abstract class BaseSupport {
             builder.directory(cwd.toFile());
         }
         builder.environment().putAll(env);
+        builder.redirectInput(ProcessBuilder.Redirect.DISCARD);
+        builder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+        builder.redirectError(ProcessBuilder.Redirect.DISCARD);
         builder.start();
+    }
+
+    public static void startInteractiveShell(List<String> command, Path cwd, Map<String, String> env) throws IOException {
+        if (isWindows()) {
+            startDetached(List.of("cmd.exe", "/c", "start", "", "cmd.exe", "/k", buildWindowsShellSnippet(command, cwd, env)), cwd, Map.of());
+            return;
+        }
+        if (isMac()) {
+            String snippet = buildShellSnippet(command, cwd, env);
+            startDetached(List.of(
+                "osascript",
+                "-e", "tell application \"Terminal\" to activate",
+                "-e", "tell application \"Terminal\" to do script " + appleScriptString(snippet)
+            ), null, Map.of());
+            return;
+        }
+        String snippet = buildShellSnippet(command, cwd, env);
+        for (List<String> launcher : linuxTerminalLaunchers(snippet)) {
+            try {
+                startDetached(launcher, cwd, Map.of());
+                return;
+            } catch (IOException ignored) {
+            }
+        }
+        startDetached(List.of("sh", "-lc", snippet), cwd, Map.of());
     }
 
     public static void copyDirectory(Path source, Path target) throws IOException {
@@ -251,6 +315,50 @@ public abstract class BaseSupport {
             .toList();
     }
 
+    public static String shellQuote(String text) {
+        return "'" + firstNonBlank(text, "").replace("'", "'\"'\"'") + "'";
+    }
+
+    public static void ensureWritable(Path path) {
+        if (path == null || !Files.exists(path)) {
+            return;
+        }
+        try {
+            if (Files.isWritable(path)) {
+                return;
+            }
+            path.toFile().setWritable(true, true);
+            if (Files.isWritable(path) || isWindows()) {
+                return;
+            }
+            String currentUser = System.getProperty("user.name", "");
+            String owner = Files.getOwner(path).getName();
+            if (!owner.endsWith(currentUser)) {
+                return;
+            }
+            Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(path);
+            if (!permissions.contains(PosixFilePermission.OWNER_WRITE)) {
+                permissions.add(PosixFilePermission.OWNER_WRITE);
+                Files.setPosixFilePermissions(path, permissions);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    public static void verifyWritable(Path path) throws IOException {
+        if (path == null) {
+            return;
+        }
+        if (!Files.exists(path) || Files.isWritable(path)) {
+            return;
+        }
+        String target = path.toAbsolutePath().toString();
+        if (isMac() && target.contains("/.codex/")) {
+            throw new IOException(target + " (Permission denied，请确认 CodexSwitcher 对 ~/.codex 有写权限；如从 dmg 直接运行，请先拖到 Applications 后再打开)");
+        }
+        throw new IOException(target + " (Permission denied)");
+    }
+
     public static String compareSemver(String left, String right) {
         String leftSem = extractSemver(left);
         String rightSem = extractSemver(right);
@@ -304,5 +412,47 @@ public abstract class BaseSupport {
             this.hasUpdate = hasUpdate;
             this.gapCount = gapCount;
         }
+    }
+
+    private static String buildShellSnippet(List<String> command, Path cwd, Map<String, String> env) {
+        List<String> parts = new ArrayList<>();
+        if (cwd != null) {
+            parts.add("cd " + shellQuote(cwd.toAbsolutePath().toString()));
+        }
+        env.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey())
+            .forEach(entry -> parts.add("export " + entry.getKey() + "=" + shellQuote(entry.getValue())));
+        parts.add(command.stream().map(BaseSupport::shellQuote).reduce((left, right) -> left + " " + right).orElse(""));
+        return String.join("; ", parts);
+    }
+
+    private static String buildWindowsShellSnippet(List<String> command, Path cwd, Map<String, String> env) {
+        List<String> parts = new ArrayList<>();
+        if (cwd != null) {
+            parts.add("cd /d " + windowsQuote(cwd.toAbsolutePath().toString()));
+        }
+        env.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey())
+            .forEach(entry -> parts.add("set \"" + entry.getKey() + "=" + firstNonBlank(entry.getValue(), "") + "\""));
+        parts.add(command.stream().map(BaseSupport::windowsQuote).reduce((left, right) -> left + " " + right).orElse(""));
+        return String.join(" && ", parts);
+    }
+
+    private static String appleScriptString(String text) {
+        return "\"" + firstNonBlank(text, "").replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+    }
+
+    private static String windowsQuote(String text) {
+        return "\"" + firstNonBlank(text, "").replace("\"", "\\\"") + "\"";
+    }
+
+    private static List<List<String>> linuxTerminalLaunchers(String snippet) {
+        return List.of(
+            List.of("x-terminal-emulator", "-e", "sh", "-lc", snippet),
+            List.of("gnome-terminal", "--", "sh", "-lc", snippet),
+            List.of("konsole", "-e", "sh", "-lc", snippet),
+            List.of("xfce4-terminal", "--command", "sh -lc " + shellQuote(snippet)),
+            List.of("xterm", "-e", "sh", "-lc", snippet)
+        );
     }
 }

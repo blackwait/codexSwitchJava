@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -237,6 +238,12 @@ public class VscodeService extends BaseSupport {
             startDetached(List.of(cli, "-r", workspace.toAbsolutePath().toString()), workspace, Map.of());
             return;
         }
+        String appBundle = findVscodeAppBundle(installDir);
+        if (!isBlank(appBundle) && isMac()) {
+            ensureOpenOnStartup(workspace);
+            startDetached(List.of("open", "-a", appBundle, workspace.toAbsolutePath().toString()), workspace, Map.of());
+            return;
+        }
         String executable = findVscodeExecutable(installDir);
         if (isBlank(executable)) {
             throw new IOException("未找到 VS Code。");
@@ -257,14 +264,22 @@ public class VscodeService extends BaseSupport {
     }
 
     public void killVscodeProcesses() {
-        for (String name : List.of("Code.exe", "Code - Insiders.exe", "msedgewebview2.exe")) {
-            runAndRead(List.of("taskkill", "/F", "/T", "/IM", name), 5);
+        if (isWindows()) {
+            for (String name : List.of("Code.exe", "Code - Insiders.exe", "msedgewebview2.exe")) {
+                runAndRead(List.of("taskkill", "/F", "/T", "/IM", name), 5);
+            }
+            return;
+        }
+        if (isMac() || isLinux()) {
+            for (String name : List.of("Visual Studio Code", "Visual Studio Code - Insiders", "Cursor", "Cursor - Insiders", "VSCodium", "Code Helper")) {
+                runAndRead(List.of("pkill", "-f", name), 5);
+            }
         }
     }
 
     public void clearVscodeCache() {
         List<Path> targets = new ArrayList<>();
-        if (!isBlank(System.getenv("APPDATA"))) {
+        if (isWindows() && !isBlank(System.getenv("APPDATA"))) {
             Path appData = Path.of(System.getenv("APPDATA"));
             for (String name : List.of("Code", "Code - Insiders")) {
                 Path root = appData.resolve(name);
@@ -277,7 +292,7 @@ public class VscodeService extends BaseSupport {
                 targets.add(root.resolve("Service Worker").resolve("ScriptCache"));
             }
         }
-        if (!isBlank(System.getenv("LOCALAPPDATA"))) {
+        if (isWindows() && !isBlank(System.getenv("LOCALAPPDATA"))) {
             Path local = Path.of(System.getenv("LOCALAPPDATA"));
             targets.add(local.resolve("Temp").resolve("Code"));
             Path microsoft = local.resolve("Microsoft");
@@ -286,11 +301,41 @@ public class VscodeService extends BaseSupport {
                 targets.add(microsoft.resolve(name).resolve("User").resolve("globalStorage"));
             }
         }
+        if (isMac()) {
+            Path appSupport = Path.of(System.getProperty("user.home"), "Library", "Application Support");
+            for (String name : List.of("Code", "Code - Insiders", "VSCodium", "Cursor")) {
+                Path root = appSupport.resolve(name);
+                targets.add(root.resolve("CachedData"));
+                targets.add(root.resolve("Cache"));
+                targets.add(root.resolve("GPUCache"));
+                targets.add(root.resolve("Service Worker").resolve("CacheStorage"));
+                targets.add(root.resolve("Service Worker").resolve("ScriptCache"));
+                targets.add(root.resolve("User").resolve("workspaceStorage"));
+                targets.add(root.resolve("User").resolve("globalStorage"));
+            }
+            Path caches = Path.of(System.getProperty("user.home"), "Library", "Caches");
+            for (String name : List.of("com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.vscodium", "com.todesktop.230313mzl4w4u92")) {
+                targets.add(caches.resolve(name));
+            }
+        }
+        if (isLinux()) {
+            Path config = Path.of(System.getProperty("user.home"), ".config");
+            for (String name : List.of("Code", "Code - Insiders", "VSCodium", "Cursor")) {
+                Path root = config.resolve(name);
+                targets.add(root.resolve("CachedData"));
+                targets.add(root.resolve("Cache"));
+                targets.add(root.resolve("GPUCache"));
+                targets.add(root.resolve("Service Worker").resolve("CacheStorage"));
+                targets.add(root.resolve("Service Worker").resolve("ScriptCache"));
+                targets.add(root.resolve("User").resolve("workspaceStorage"));
+                targets.add(root.resolve("User").resolve("globalStorage"));
+            }
+        }
         targets.forEach(BaseSupport::deleteRecursively);
     }
 
     public String findVscodeCli(CodexService codexService) {
-        for (String name : List.of("code", "code.cmd", "code.exe", "code-insiders", "code-insiders.cmd")) {
+        for (String name : List.of("code", "code.cmd", "code.exe", "code-insiders", "code-insiders.cmd", "codium", "codium.cmd", "cursor", "cursor.cmd")) {
             String executable = codexService.findExecutable(name);
             if (!isBlank(executable)) {
                 return executable;
@@ -307,19 +352,44 @@ public class VscodeService extends BaseSupport {
                     return candidate.toString();
                 }
             }
+            if (isMac()) {
+                for (String relative : List.of(
+                    "Contents/MacOS/Electron",
+                    "Contents/MacOS/Visual Studio Code",
+                    "Contents/MacOS/Cursor",
+                    "Contents/MacOS/VSCodium"
+                )) {
+                    Path candidate = installDir.resolve(relative);
+                    if (Files.isRegularFile(candidate)) {
+                        return candidate.toString();
+                    }
+                }
+            }
         }
         List<Path> candidates = new ArrayList<>();
-        if (!isBlank(System.getenv("LOCALAPPDATA"))) {
+        if (isWindows() && !isBlank(System.getenv("LOCALAPPDATA"))) {
             candidates.add(Path.of(System.getenv("LOCALAPPDATA"), "Programs", "Microsoft VS Code", "Code.exe"));
             candidates.add(Path.of(System.getenv("LOCALAPPDATA"), "Programs", "Microsoft VS Code Insiders", "Code - Insiders.exe"));
         }
-        if (!isBlank(System.getenv("ProgramFiles"))) {
+        if (isWindows() && !isBlank(System.getenv("ProgramFiles"))) {
             candidates.add(Path.of(System.getenv("ProgramFiles"), "Microsoft VS Code", "Code.exe"));
             candidates.add(Path.of(System.getenv("ProgramFiles"), "Microsoft VS Code Insiders", "Code - Insiders.exe"));
         }
-        if (!isBlank(System.getenv("ProgramFiles(x86)"))) {
+        if (isWindows() && !isBlank(System.getenv("ProgramFiles(x86)"))) {
             candidates.add(Path.of(System.getenv("ProgramFiles(x86)"), "Microsoft VS Code", "Code.exe"));
             candidates.add(Path.of(System.getenv("ProgramFiles(x86)"), "Microsoft VS Code Insiders", "Code - Insiders.exe"));
+        }
+        if (isMac()) {
+            candidates.addAll(List.of(
+                Path.of("/Applications/Visual Studio Code.app", "Contents", "MacOS", "Electron"),
+                Path.of("/Applications/Visual Studio Code - Insiders.app", "Contents", "MacOS", "Electron"),
+                Path.of(System.getProperty("user.home"), "Applications", "Visual Studio Code.app", "Contents", "MacOS", "Electron"),
+                Path.of(System.getProperty("user.home"), "Applications", "Visual Studio Code - Insiders.app", "Contents", "MacOS", "Electron"),
+                Path.of("/Applications/Cursor.app", "Contents", "MacOS", "Cursor"),
+                Path.of(System.getProperty("user.home"), "Applications", "Cursor.app", "Contents", "MacOS", "Cursor"),
+                Path.of("/Applications/VSCodium.app", "Contents", "MacOS", "VSCodium"),
+                Path.of(System.getProperty("user.home"), "Applications", "VSCodium.app", "Contents", "MacOS", "VSCodium")
+            ));
         }
         return candidates.stream().filter(Files::isRegularFile).findFirst().map(Path::toString).orElse("");
     }
@@ -552,15 +622,72 @@ public class VscodeService extends BaseSupport {
     }
 
     private List<Path> settingsPaths() {
-        if (isBlank(System.getenv("APPDATA"))) {
-            return List.of();
+        if (isWindows()) {
+            if (isBlank(System.getenv("APPDATA"))) {
+                return List.of();
+            }
+            return List.of(
+                Path.of(System.getenv("APPDATA"), "Code", "User", "settings.json"),
+                Path.of(System.getenv("APPDATA"), "Code - Insiders", "User", "settings.json"),
+                Path.of(System.getenv("APPDATA"), "VSCodium", "User", "settings.json"),
+                Path.of(System.getenv("APPDATA"), "Cursor", "User", "settings.json")
+            ).stream().filter(Files::exists).toList();
         }
-        return List.of(
-            Path.of(System.getenv("APPDATA"), "Code", "User", "settings.json"),
-            Path.of(System.getenv("APPDATA"), "Code - Insiders", "User", "settings.json"),
-            Path.of(System.getenv("APPDATA"), "VSCodium", "User", "settings.json"),
-            Path.of(System.getenv("APPDATA"), "Cursor", "User", "settings.json")
-        ).stream().filter(Files::exists).toList();
+        if (isMac()) {
+            Path appSupport = Path.of(System.getProperty("user.home"), "Library", "Application Support");
+            return List.of(
+                appSupport.resolve("Code").resolve("User").resolve("settings.json"),
+                appSupport.resolve("Code - Insiders").resolve("User").resolve("settings.json"),
+                appSupport.resolve("VSCodium").resolve("User").resolve("settings.json"),
+                appSupport.resolve("Cursor").resolve("User").resolve("settings.json")
+            ).stream().filter(Files::exists).toList();
+        }
+        if (isLinux()) {
+            Path config = Path.of(System.getProperty("user.home"), ".config");
+            return List.of(
+                config.resolve("Code").resolve("User").resolve("settings.json"),
+                config.resolve("Code - Insiders").resolve("User").resolve("settings.json"),
+                config.resolve("VSCodium").resolve("User").resolve("settings.json"),
+                config.resolve("Cursor").resolve("User").resolve("settings.json")
+            ).stream().filter(Files::exists).toList();
+        }
+        return List.of();
+    }
+
+    private String findVscodeAppBundle(Path installDir) {
+        List<Path> candidates = new ArrayList<>();
+        if (installDir != null) {
+            candidates.add(installDir);
+            for (String name : List.of(
+                "Visual Studio Code.app",
+                "Visual Studio Code - Insiders.app",
+                "Cursor.app",
+                "Cursor - Insiders.app",
+                "VSCodium.app"
+            )) {
+                candidates.add(installDir.resolve(name));
+            }
+        }
+        if (isMac()) {
+            candidates.addAll(List.of(
+                Path.of("/Applications/Visual Studio Code.app"),
+                Path.of("/Applications/Visual Studio Code - Insiders.app"),
+                Path.of("/Applications/Cursor.app"),
+                Path.of("/Applications/Cursor - Insiders.app"),
+                Path.of("/Applications/VSCodium.app"),
+                Path.of(System.getProperty("user.home"), "Applications", "Visual Studio Code.app"),
+                Path.of(System.getProperty("user.home"), "Applications", "Visual Studio Code - Insiders.app"),
+                Path.of(System.getProperty("user.home"), "Applications", "Cursor.app"),
+                Path.of(System.getProperty("user.home"), "Applications", "Cursor - Insiders.app"),
+                Path.of(System.getProperty("user.home"), "Applications", "VSCodium.app")
+            ));
+        }
+        return candidates.stream()
+            .filter(Objects::nonNull)
+            .filter(path -> Files.isDirectory(path) && path.getFileName().toString().endsWith(".app"))
+            .findFirst()
+            .map(Path::toString)
+            .orElse("");
     }
 
     private Map<String, Object> readJsonMapWithComments(Path path) {

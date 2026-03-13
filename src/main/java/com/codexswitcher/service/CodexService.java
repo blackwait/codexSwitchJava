@@ -81,7 +81,7 @@ public class CodexService extends BaseSupport {
             String encoded = Base64.getEncoder().encodeToString(command.getBytes(StandardCharsets.UTF_16LE));
             startDetached(List.of("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded), workspace, Map.of());
         } else {
-            startDetached(List.of(executable, "chat"), workspace, Map.of());
+            startInteractiveShell(List.of(executable, "chat"), workspace, Map.of());
         }
     }
 
@@ -94,13 +94,15 @@ public class CodexService extends BaseSupport {
         if (isWindows()) {
             builder = new ProcessBuilder("cmd.exe", "/c", "start", "", executable, "chat", "-m", firstNonBlank(model, "gpt-5.2-codex"));
         } else {
-            builder = new ProcessBuilder(executable, "chat", "-m", firstNonBlank(model, "gpt-5.2-codex"));
+            startInteractiveShell(
+                List.of(executable, "chat", "-m", firstNonBlank(model, "gpt-5.2-codex")),
+                null,
+                buildAccountEnv(account)
+            );
+            return;
         }
-        builder.environment().put("OPENAI_API_KEY", account.getApiKey());
-        builder.environment().put("OPENAI_BASE_URL", account.getBaseUrl());
-        if (account.isTeam() && !isBlank(account.getOrgId())) {
-            builder.environment().put("OPENAI_ORG_ID", account.getOrgId());
-        } else {
+        builder.environment().putAll(buildAccountEnv(account));
+        if (!account.isTeam() || isBlank(account.getOrgId())) {
             builder.environment().remove("OPENAI_ORG_ID");
         }
         builder.start();
@@ -110,7 +112,7 @@ public class CodexService extends BaseSupport {
         if (isWindows()) {
             startDetached(List.of("cmd.exe", "/c", "start", "", "cmd.exe", "/k", "npm i -g @openai/codex@latest"), null, Map.of());
         } else {
-            startDetached(List.of("sh", "-lc", "npm i -g @openai/codex@latest"), null, Map.of());
+            startInteractiveShell(List.of("sh", "-lc", "npm i -g @openai/codex@latest"), null, Map.of());
         }
     }
 
@@ -137,17 +139,20 @@ public class CodexService extends BaseSupport {
             return direct;
         }
         for (Path base : buildSearchPaths()) {
-            for (String ext : List.of(".exe", ".cmd", ".bat", ".ps1", "")) {
+            for (String ext : commandSuffixes()) {
                 Path candidate = base.resolve("codex" + ext);
                 if (Files.isRegularFile(candidate)) {
                     return candidate.toAbsolutePath().toString();
                 }
             }
         }
-        String whereExe = firstNonBlank(findExecutable("where"), findExecutable("where.exe"));
-        if (!isBlank(whereExe)) {
+        String locator = isWindows()
+            ? firstNonBlank(findExecutable("where"), findExecutable("where.exe"))
+            : firstNonBlank(findExecutable("which"), "/usr/bin/which");
+        if (!isBlank(locator)) {
             try {
-                Process process = new ProcessBuilder(whereExe, "codex").start();
+                List<String> command = isWindows() ? List.of(locator, "codex") : List.of(locator, "-a", "codex");
+                Process process = new ProcessBuilder(command).start();
                 process.waitFor(2, TimeUnit.SECONDS);
                 List<String> lines = new java.io.BufferedReader(new java.io.InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))
                     .lines()
@@ -163,9 +168,8 @@ public class CodexService extends BaseSupport {
     }
 
     public String findExecutable(String commandName) {
-        for (String raw : pathEntries()) {
-            Path base = Path.of(raw);
-            for (String ext : List.of(".exe", ".cmd", ".bat", ".ps1", "")) {
+        for (Path base : buildSearchPaths()) {
+            for (String ext : commandSuffixes(commandName)) {
                 String name = commandName.toLowerCase(Locale.ROOT).endsWith(ext) ? commandName : commandName + ext;
                 Path candidate = base.resolve(name);
                 if (Files.isRegularFile(candidate)) {
@@ -176,42 +180,82 @@ public class CodexService extends BaseSupport {
         return "";
     }
 
-    private boolean isWindows() {
-        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
-    }
-
     private List<Path> buildSearchPaths() {
         List<Path> paths = new ArrayList<>();
         for (String raw : pathEntries()) {
-            paths.add(Path.of(raw));
+            if (isBlank(raw)) {
+                continue;
+            }
+            Path path = Path.of(raw);
+            if (Files.isDirectory(path) && !paths.contains(path)) {
+                paths.add(path);
+            }
         }
-        if (!isBlank(System.getenv("APPDATA"))) {
+        if (isWindows() && !isBlank(System.getenv("APPDATA"))) {
             Path npm = Path.of(System.getenv("APPDATA"), "npm");
-            if (Files.isDirectory(npm)) {
+            if (Files.isDirectory(npm) && !paths.contains(npm)) {
                 paths.add(0, npm);
             }
         }
-        if (!isBlank(System.getenv("USERPROFILE"))) {
+        if (isWindows() && !isBlank(System.getenv("USERPROFILE"))) {
             Path global = Path.of(System.getenv("USERPROFILE"), ".npm-global", "bin");
-            if (Files.isDirectory(global)) {
+            if (Files.isDirectory(global) && !paths.contains(global)) {
                 paths.add(0, global);
+            }
+        }
+        if (isMac() || isLinux()) {
+            for (Path candidate : List.of(
+                Path.of(System.getProperty("user.home"), ".npm-global", "bin"),
+                Path.of(System.getProperty("user.home"), ".local", "bin"),
+                Path.of(System.getProperty("user.home"), ".bun", "bin"),
+                Path.of("/opt/homebrew/bin"),
+                Path.of("/usr/local/bin"),
+                Path.of("/opt/local/bin"),
+                Path.of("/usr/bin"),
+                Path.of("/bin")
+            )) {
+                if (Files.isDirectory(candidate) && !paths.contains(candidate)) {
+                    paths.add(0, candidate);
+                }
             }
         }
         return paths;
     }
 
     private String pickBestMatch(List<String> lines) {
-        for (String ext : List.of(".exe", ".cmd", ".bat", ".ps1", "")) {
+        for (String ext : commandSuffixes()) {
             for (String item : lines) {
-                String normalized = item.trim().toLowerCase(Locale.ROOT);
+                String trimmed = item.trim();
+                String normalized = trimmed.toLowerCase(Locale.ROOT);
                 if (!ext.isEmpty() && normalized.endsWith(ext)) {
-                    return item.trim();
+                    return trimmed;
                 }
-                if (ext.isEmpty() && !normalized.contains(".")) {
-                    return item.trim();
+                if (ext.isEmpty()) {
+                    String fileName = Path.of(trimmed).getFileName().toString().toLowerCase(Locale.ROOT);
+                    if (!fileName.contains(".")) {
+                        return trimmed;
+                    }
                 }
             }
         }
         return lines.get(0).trim();
+    }
+
+    private Map<String, String> buildAccountEnv(Account account) {
+        java.util.LinkedHashMap<String, String> env = new java.util.LinkedHashMap<>();
+        env.put("OPENAI_API_KEY", firstNonBlank(account.getApiKey(), ""));
+        env.put("OPENAI_BASE_URL", firstNonBlank(account.getBaseUrl(), ""));
+        if (account.isTeam() && !isBlank(account.getOrgId())) {
+            env.put("OPENAI_ORG_ID", account.getOrgId());
+        }
+        return env;
+    }
+
+    private List<String> commandSuffixes() {
+        return isWindows() ? List.of(".exe", ".cmd", ".bat", ".ps1", "") : List.of("", ".sh");
+    }
+
+    private List<String> commandSuffixes(String commandName) {
+        return commandName.contains(".") ? List.of("") : commandSuffixes();
     }
 }

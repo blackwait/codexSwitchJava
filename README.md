@@ -13,19 +13,27 @@
 
 ## 环境要求
 
-- JDK 21
+- JDK 21+
 - Maven 3.9+
-- Windows PowerShell 7（推荐）
+- macOS 构建需要 `jpackage`
+- Windows 打包推荐 PowerShell 7
 
 ## 快速开始
 
 1. 安装依赖并构建：
 
-```powershell
-mvn -q -DskipTests clean package -Djavafx.platform=win
+```bash
+mvn -q -DskipTests clean package
 ```
 
-2. 本地开发启动：
+macOS：
+
+```bash
+chmod +x deploy/build_mac.sh
+./deploy/build_mac.sh
+```
+
+2. Windows 本地开发启动：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File deploy\run_dev.ps1
@@ -40,6 +48,8 @@ powershell -ExecutionPolicy Bypass -File deploy\build_win.ps1
 ## 产物目录
 
 - `target/`：Maven 构建输出
+- `dist/mac/CodexSwitcher.app`：macOS app-image
+- `dist/mac/*.dmg`：macOS 安装包
 - `dist/win/CodexSwitcher/`：`jpackage` 生成的 app-image
 - `dist/win/*.exe`：安装包（检测到 WiX 时生成）
 
