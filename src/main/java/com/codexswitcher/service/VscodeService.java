@@ -10,8 +10,6 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -20,11 +18,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class VscodeService extends BaseSupport {
-
-    private static final Pattern TOKEN_PATTERN = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._:-]{1,120}$");
 
     public List<Path> extensionRoots(AppState state) {
         List<Path> homes = new ArrayList<>();
@@ -120,9 +115,7 @@ public class VscodeService extends BaseSupport {
             try (DirectoryStream<Path> stream = Files.newDirectoryStream(root)) {
                 for (Path path : stream) {
                     if (Files.isDirectory(path) && path.getFileName().toString().toLowerCase(Locale.ROOT).startsWith("openai.chatgpt")) {
-                        ExtensionInfo info = new ExtensionInfo(path, parseExtensionVersion(path));
-                        info.setIndexPath(findIndexFile(path));
-                        items.add(info);
+                        items.add(new ExtensionInfo(path, parseExtensionVersion(path)));
                     }
                 }
             } catch (Exception ignored) {
@@ -130,22 +123,6 @@ public class VscodeService extends BaseSupport {
         }
         items.sort(Comparator.comparing(ExtensionInfo::getVersion).reversed());
         return items;
-    }
-
-    public Path findIndexFile(Path extensionPath) {
-        Path assets = extensionPath.resolve("webview").resolve("assets");
-        if (!Files.isDirectory(assets)) {
-            return null;
-        }
-        try {
-            return Files.list(assets)
-                .filter(path -> path.getFileName().toString().startsWith("index-") && path.getFileName().toString().endsWith(".js"))
-                .sorted((left, right) -> Long.compare(lastModified(right), lastModified(left)))
-                .findFirst()
-                .orElse(null);
-        } catch (Exception e) {
-            return null;
-        }
     }
 
     public String parseExtensionVersion(Path path) {
@@ -222,63 +199,6 @@ public class VscodeService extends BaseSupport {
             case "preview" -> "预览版";
             default -> "";
         };
-    }
-
-    public PatchOutcome applyPatch(Path indexPath, String rawModelText) throws IOException {
-        if (indexPath == null || !Files.isRegularFile(indexPath)) {
-            throw new IOException("请先扫描并选择 index 文件。");
-        }
-        List<String> models = targetModels(rawModelText);
-        if (models.isEmpty()) {
-            throw new IOException("请至少输入一个模型名。");
-        }
-        String original = readText(indexPath);
-        PatchResult runtime = applyRuntimeModelPatch(original, models);
-        PatchResult allowlist = applyAllowlistPatch(original, models);
-        PatchResult filter = applyApiKeyFilterPatch(allowlist.content, models);
-        PatchResult order = applyApiKeyOrderPatch(filter.content, models);
-        PatchResult init = applyInitialDataPatch(order.content, models);
-        boolean legacyOk = allowlist.ok && filter.ok;
-        if (!legacyOk && !runtime.ok) {
-            throw new IOException("当前扩展版本结构已变化，旧补丁规则和新版运行时补丁都未命中，请先确认选择的是 openai.chatgpt 的 index-*.js。");
-        }
-        Path backup = backupIndex(indexPath);
-        writeText(indexPath, legacyOk ? init.content : runtime.content);
-        List<String> optionalFailed = new ArrayList<>();
-        if (legacyOk) {
-            if (!order.ok) {
-                optionalFailed.add("apikey-order");
-            }
-            if (!init.ok) {
-                optionalFailed.add("initial-data");
-            }
-        }
-        return new PatchOutcome(backup, models, optionalFailed);
-    }
-
-    public Path backupIndex(Path indexPath) throws IOException {
-        Path backupDir = indexPath.getParent().resolve("backup");
-        Files.createDirectories(backupDir);
-        String stamp = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss").format(LocalDateTime.now());
-        Path backup = backupDir.resolve(indexPath.getFileName() + "." + stamp + ".bak");
-        Files.copy(indexPath, backup, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-        return backup;
-    }
-
-    public Path restoreLatestBackup(Path indexPath) throws IOException {
-        Path backupDir = indexPath.getParent().resolve("backup");
-        if (!Files.isDirectory(backupDir)) {
-            throw new IOException("未发现备份目录。");
-        }
-        List<Path> backups = Files.list(backupDir)
-            .filter(path -> path.getFileName().toString().startsWith(indexPath.getFileName() + ".") && path.getFileName().toString().endsWith(".bak"))
-            .sorted((left, right) -> Long.compare(lastModified(right), lastModified(left)))
-            .toList();
-        if (backups.isEmpty()) {
-            throw new IOException("未找到备份文件。");
-        }
-        Files.copy(backups.get(0), indexPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-        return backups.get(0);
     }
 
     public void disableAutoUpdate() throws IOException {
@@ -439,238 +359,6 @@ public class VscodeService extends BaseSupport {
 
     public boolean supportsCommand(String cli) {
         return runAndRead(List.of(cli, "--help"), 3).contains("--command");
-    }
-
-    public List<String> targetModels(String raw) {
-        List<String> defaults = List.of("gpt-5.3-codex", "gpt-5.2-codex", "gpt-5.2");
-        List<String> parsed = splitModelInput(raw);
-        List<String> merged = new ArrayList<>(parsed);
-        for (String value : defaults) {
-            if (merged.stream().noneMatch(item -> item.equalsIgnoreCase(value))) {
-                merged.add(value);
-            }
-        }
-        return merged;
-    }
-
-    private List<String> splitModelInput(String raw) {
-        String normalized = firstNonBlank(raw, "").replace('，', ',').replace('；', ';');
-        List<String> values = new ArrayList<>();
-        for (String token : normalized.split("[,;|\\s]+")) {
-            String value = token.trim();
-            if (TOKEN_PATTERN.matcher(value).matches() && values.stream().noneMatch(item -> item.equalsIgnoreCase(value))) {
-                values.add(value);
-            }
-        }
-        return values;
-    }
-
-    private PatchResult applyAllowlistPatch(String content, List<String> models) {
-        Matcher matcher = Pattern.compile("([A-Za-z_$][\\w$]*)=new Set\\(\\[(.*?)]\\)", Pattern.DOTALL).matcher(content);
-        StringBuffer buffer = new StringBuffer();
-        boolean touched = false;
-        while (matcher.find()) {
-            String name = matcher.group(1);
-            String body = matcher.group(2);
-            String replacement = matcher.group(0);
-            if (!name.toUpperCase(Locale.ROOT).contains("AUTH_ONLY")
-                && ("SUe".equals(name) || content.contains(":" + name + ").has(v.model)"))) {
-                List<String> existing = quotedValues(body);
-                long gptCount = existing.stream().filter(item -> item.startsWith("gpt-")).count();
-                if (existing.contains("gpt-5.2-codex") || existing.contains("gpt-5.1-codex-mini") || gptCount >= 3) {
-                    touched = true;
-                    String quote = body.contains("\"") ? "\"" : "'";
-                    List<String> merged = mergeUnique(models, existing);
-                    String mergedBody = merged.stream().map(item -> quote + item + quote).collect(java.util.stream.Collectors.joining(","));
-                    replacement = name + "=new Set([" + mergedBody + "])";
-                }
-            }
-            matcher.appendReplacement(buffer, Matcher.quoteReplacement(replacement));
-        }
-        matcher.appendTail(buffer);
-        if (touched) {
-            return new PatchResult(buffer.toString(), true);
-        }
-        Matcher order = Pattern.compile("(MODEL_ORDER_BY_AUTH_METHOD\\s*=\\s*\\{.*?apikey\\s*:\\s*\\[)(.*?)(])", Pattern.DOTALL).matcher(content);
-        if (order.find()) {
-            String body = order.group(2);
-            String quote = body.contains("\"") ? "\"" : "'";
-            String mergedBody = mergeUnique(models, quotedValues(body)).stream()
-                .map(item -> quote + item + quote)
-                .collect(java.util.stream.Collectors.joining(","));
-            return new PatchResult(content.substring(0, order.start(2)) + mergedBody + content.substring(order.end(2)), true);
-        }
-        return new PatchResult(content, false);
-    }
-
-    private PatchResult applyApiKeyFilterPatch(String content, List<String> models) {
-        String patched = content;
-        boolean gateOk = false;
-        String expected = "i===\"chatgpt\"||i===\"apikey\"?!0:";
-        if (patched.contains(expected)) {
-            gateOk = true;
-        } else {
-            String source = "i===\"chatgpt\"?!0:(i===\"copilot\"?kUe:SUe).has(v.model)";
-            String target = "i===\"chatgpt\"||i===\"apikey\"?!0:(i===\"copilot\"?kUe:SUe).has(v.model)";
-            if (patched.contains(source)) {
-                patched = patched.replace(source, target);
-                gateOk = true;
-            } else {
-                Matcher matcher = Pattern.compile("i===\"chatgpt\"\\?!0:\\(i===\"copilot\"\\?([A-Za-z_$][\\w$]*):([A-Za-z_$][\\w$]*)\\)\\.has\\(v\\.model\\)").matcher(patched);
-                if (matcher.find()) {
-                    String replacement = "i===\"chatgpt\"||i===\"apikey\"?!0:(i===\"copilot\"?" + matcher.group(1) + ":" + matcher.group(2) + ").has(v.model)";
-                    patched = patched.substring(0, matcher.start()) + replacement + patched.substring(matcher.end());
-                    gateOk = true;
-                }
-            }
-        }
-        patched = applyChatGptAuthGuardPatch(patched);
-        patched = applyChatGptAuthOnlyModelsPatch(patched, models);
-        return new PatchResult(patched, gateOk);
-    }
-
-    private String applyChatGptAuthOnlyModelsPatch(String content, List<String> models) {
-        Matcher matcher = Pattern.compile("CHAT_GPT_AUTH_ONLY_MODELS\\s*=\\s*new Set\\(\\[(.*?)]\\)", Pattern.DOTALL).matcher(content);
-        if (!matcher.find()) {
-            return content;
-        }
-        String body = matcher.group(1);
-        String quote = body.contains("\"") ? "\"" : "'";
-        List<String> filtered = quotedValues(body).stream()
-            .filter(item -> models.stream().noneMatch(model -> model.equalsIgnoreCase(item)))
-            .toList();
-        String replacement = filtered.stream().map(item -> quote + item + quote).collect(java.util.stream.Collectors.joining(","));
-        return content.substring(0, matcher.start(1)) + replacement + content.substring(matcher.end(1));
-    }
-
-    private String applyChatGptAuthGuardPatch(String content) {
-        String marker = "CHAT_GPT_AUTH_ONLY_MODELS.has(normalizeModel(mt))";
-        if (!content.contains(marker)) {
-            return content;
-        }
-        Matcher already = Pattern.compile("[A-Za-z_$][\\w$]*!==\"apikey\"\\s*&&\\s*!!mt\\s*&&\\s*CHAT_GPT_AUTH_ONLY_MODELS\\.has\\(normalizeModel\\(mt\\)\\)").matcher(content);
-        if (already.find()) {
-            return content;
-        }
-        int index = content.indexOf(marker);
-        String window = content.substring(Math.max(0, index - 800), index);
-        Matcher matcher = Pattern.compile("([A-Za-z_$][\\w$]*)===\"(?:chatgpt|apikey)\"").matcher(window);
-        String authVar = "";
-        while (matcher.find()) {
-            authVar = matcher.group(1);
-        }
-        if (authVar.isBlank()) {
-            return content;
-        }
-        String source = "&&!!mt&&CHAT_GPT_AUTH_ONLY_MODELS.has(normalizeModel(mt))";
-        if (content.contains(source)) {
-            return content.replace(source, "&&" + authVar + "!=\"apikey\"&&!!mt&&CHAT_GPT_AUTH_ONLY_MODELS.has(normalizeModel(mt))");
-        }
-        Matcher spaced = Pattern.compile("&&\\s*!!mt\\s*&&\\s*CHAT_GPT_AUTH_ONLY_MODELS\\.has\\(normalizeModel\\(mt\\)\\)").matcher(content);
-        if (spaced.find()) {
-            return content.substring(0, spaced.start()) + "&& " + authVar + "!=\"apikey\" && !!mt && CHAT_GPT_AUTH_ONLY_MODELS.has(normalizeModel(mt))"
-                + content.substring(spaced.end());
-        }
-        return content;
-    }
-
-    private PatchResult applyApiKeyOrderPatch(String content, List<String> models) {
-        Matcher matcher = Pattern.compile("i===\"apikey\"&&\\(\\(\\)=>\\{const Y=\\[(.*?)]\\,X=new Map\\(Y\\.map\\(\\(A,R\\)=>\\[A,R]\\)\\);", Pattern.DOTALL).matcher(content);
-        if (!matcher.find()) {
-            return new PatchResult(content, false);
-        }
-        String body = matcher.group(1);
-        String quote = body.contains("\"") ? "\"" : "'";
-        String merged = mergeUnique(models, quotedValues(body)).stream()
-            .map(item -> quote + item + quote)
-            .collect(java.util.stream.Collectors.joining(","));
-        String patched = body.equals(merged) ? content : content.substring(0, matcher.start(1)) + merged + content.substring(matcher.end(1));
-        int sortIndex = patched.indexOf("m.models.sort(", matcher.start());
-        if (sortIndex < 0) {
-            return new PatchResult(patched, false);
-        }
-        String segment = patched.substring(matcher.start(), Math.min(patched.length(), sortIndex + 500));
-        StringBuilder injection = new StringBuilder();
-        for (String model : models) {
-            String marker = "m.models.find(A=>A.model===\"" + model + "\")";
-            if (!segment.contains(marker)) {
-                injection.append("m.models.find(A=>A.model===\"").append(model)
-                    .append("\")||m.models.unshift({model:\"").append(model)
-                    .append("\",supportedReasoningEfforts:").append(reasoningEffortsLiteral())
-                    .append(",defaultReasoningEffort:\"medium\"}),");
-            }
-        }
-        if (injection.isEmpty()) {
-            return new PatchResult(patched, true);
-        }
-        return new PatchResult(patched.substring(0, sortIndex) + injection + patched.substring(sortIndex), true);
-    }
-
-    private PatchResult applyInitialDataPatch(String content, List<String> models) {
-        String marker = "initialData:i===\"apikey\"?{data:[";
-        if (!content.contains(marker)) {
-            return new PatchResult(content, false);
-        }
-        String desired = "initialData:i===\"apikey\"?{data:["
-            + models.stream()
-            .map(model -> "{model:\"" + model + "\",supportedReasoningEfforts:" + reasoningEffortsLiteral() + ",defaultReasoningEffort:\"medium\",isDefault:!1}")
-            .collect(java.util.stream.Collectors.joining(","))
-            + "]}:void 0";
-        if (content.contains(desired)) {
-            return new PatchResult(content, true);
-        }
-        Matcher matcher = Pattern.compile("initialData:i===\\\"apikey\\\"\\?\\{data:\\[(.*?)]}:void 0", Pattern.DOTALL).matcher(content);
-        if (!matcher.find()) {
-            return new PatchResult(content, false);
-        }
-        return new PatchResult(content.substring(0, matcher.start()) + desired + content.substring(matcher.end()), true);
-    }
-
-    private PatchResult applyRuntimeModelPatch(String content, List<String> models) {
-        String helperMarker = "globalThis.__codexSwitcherMergeModels";
-        String patched = content;
-        boolean touched = false;
-        if (!patched.contains(helperMarker)) {
-            String anchor = "function HQ(e){";
-            int index = patched.indexOf(anchor);
-            if (index < 0) {
-                return new PatchResult(content, false);
-            }
-            patched = patched.substring(0, index) + buildRuntimeHelper(models) + patched.substring(index);
-            touched = true;
-        }
-        String source = "function HQ(e){let t=(0,Q.c)(23),{models:n,modelSettings:r,isFastModeOn:i,setModelAndReasoningEffort:a,conversationId:o,toast:s,shouldWarnAboutModelChanges:c,focusComposer:l,onSelectComplete:u}=e,d=vs();if(!n)return null;";
-        String target = "function HQ(e){let t=(0,Q.c)(23),{models:n,modelSettings:r,isFastModeOn:i,setModelAndReasoningEffort:a,conversationId:o,toast:s,shouldWarnAboutModelChanges:c,focusComposer:l,onSelectComplete:u}=e,d=vs();n=globalThis.__codexSwitcherMergeModels?globalThis.__codexSwitcherMergeModels(n):n;if(!n)return null;";
-        if (patched.contains(source)) {
-            patched = patched.replace(source, target);
-            touched = true;
-        } else if (!patched.contains("n=globalThis.__codexSwitcherMergeModels?globalThis.__codexSwitcherMergeModels(n):n;")) {
-            return new PatchResult(content, false);
-        }
-        return new PatchResult(patched, touched || patched.contains(helperMarker));
-    }
-
-    private String reasoningEffortsLiteral() {
-        return "[{reasoningEffort:\"minimal\",description:\"minimal effort\"},"
-            + "{reasoningEffort:\"low\",description:\"low effort\"},"
-            + "{reasoningEffort:\"medium\",description:\"medium effort\"},"
-            + "{reasoningEffort:\"high\",description:\"high effort\"},"
-            + "{reasoningEffort:\"xhigh\",description:\"xhigh effort\"}]";
-    }
-
-    private String buildRuntimeHelper(List<String> models) {
-        return "(function(){const e=["
-            + models.stream()
-            .map(model -> "{model:\"" + escapeJs(model) + "\",displayName:\"" + escapeJs(model) + "\",supportedReasoningEfforts:" + reasoningEffortsLiteral()
-                + ",defaultReasoningEffort:\"medium\"}")
-            .collect(java.util.stream.Collectors.joining(","))
-            + "],t=e.map(n=>n.model.toLowerCase()).join(\",\");if(globalThis.__codexSwitcherMergeModels&&globalThis.__codexSwitcherMergeModels.__codexSwitcherSignature===t)return;"
-            + "globalThis.__codexSwitcherMergeModels=n=>{if(!Array.isArray(n))return n;const r=new Set(n.filter(i=>i&&typeof i.model===\"string\").map(i=>String(i.model).toLowerCase())),i=e.filter(a=>!r.has(a.model.toLowerCase())).map(a=>({...a}));return i.concat(n)};"
-            + "globalThis.__codexSwitcherMergeModels.__codexSwitcherSignature=t;})();";
-    }
-
-    private String escapeJs(String value) {
-        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private void ensureOpenOnStartup(Path workspace) throws IOException {
@@ -962,15 +650,4 @@ public class VscodeService extends BaseSupport {
         public final Map<String, String> channelMap = new LinkedHashMap<>();
     }
 
-    public static class PatchOutcome {
-        public final Path backupPath;
-        public final List<String> models;
-        public final List<String> optionalFailed;
-
-        public PatchOutcome(Path backupPath, List<String> models, List<String> optionalFailed) {
-            this.backupPath = backupPath;
-            this.models = models;
-            this.optionalFailed = optionalFailed;
-        }
-    }
 }

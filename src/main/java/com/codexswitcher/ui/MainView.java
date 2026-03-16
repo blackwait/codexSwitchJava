@@ -81,6 +81,7 @@ public class MainView extends BorderPane {
     private void addNav(VBox nav, String text, String key) {
         ToggleButton button = new ToggleButton(text);
         button.getStyleClass().add("nav-button");
+        Ui.decorateActionIcon(button, text);
         button.setMaxWidth(Double.MAX_VALUE);
         button.setToggleGroup(navGroup);
         button.setOnAction(event -> showPage(key));

@@ -18,6 +18,8 @@ import java.util.TreeSet;
 
 public class StoreService extends BaseSupport {
 
+    private static final String DEFAULT_ACCOUNT_TEST_MODEL = "gpt-5.2-codex";
+
     public ObjectNode loadStoreNode() {
         ObjectNode root;
         if (Files.exists(PROFILE_STORE)) {
@@ -199,6 +201,22 @@ public class StoreService extends BaseSupport {
         }
         Path path = Path.of(value);
         return Files.exists(path) ? path : null;
+    }
+
+    public void saveAccountTestModel(String model) throws IOException {
+        ObjectNode root = loadStoreNode();
+        String value = trimToEmpty(model);
+        if (isBlank(value)) {
+            root.putNull("account_test_model");
+        } else {
+            root.put("account_test_model", value);
+        }
+        saveStoreNode(root);
+    }
+
+    public String loadAccountTestModel() {
+        String value = trimToEmpty(loadStoreNode().path("account_test_model").asText(""));
+        return isBlank(value) ? DEFAULT_ACCOUNT_TEST_MODEL : value;
     }
 
     private void updateAuth(String apiKey, String orgId) throws IOException {

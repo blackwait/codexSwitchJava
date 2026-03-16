@@ -23,13 +23,15 @@ import java.time.format.DateTimeFormatter;
 
 public class AccountPage extends PagePane {
 
+    private static final String DEFAULT_TEST_MODEL = "gpt-5.2-codex";
+
     private final Label currentLabel = new Label("未选择");
     private final ListView<Account> listView = new ListView<>();
     private final TextField nameField = new TextField();
     private final TextField baseField = new TextField();
     private final PasswordField keyField = new PasswordField();
     private final TextField orgField = new TextField();
-    private final TextField modelField = new TextField("gpt-5.2-codex");
+    private final TextField modelField = new TextField(DEFAULT_TEST_MODEL);
     private final RadioButton teamRadio = new RadioButton("Team 账号");
     private final RadioButton officialRadio = new RadioButton("ChatGPT 官方账号");
     private final RadioButton proxyRadio = new RadioButton("中转账号");
@@ -54,6 +56,11 @@ public class AccountPage extends PagePane {
         officialRadio.setToggleGroup(group);
         proxyRadio.setToggleGroup(group);
         proxyRadio.setSelected(true);
+        modelField.focusedProperty().addListener((obs, oldValue, focused) -> {
+            if (Boolean.FALSE.equals(focused)) {
+                persistTestModelQuietly();
+            }
+        });
 
         GridPane form = new GridPane();
         form.setHgap(10);
@@ -106,6 +113,7 @@ public class AccountPage extends PagePane {
 
     @Override
     public void onShow() {
+        modelField.setText(context.services().store().loadAccountTestModel());
         loadAccounts();
     }
 
@@ -228,11 +236,24 @@ public class AccountPage extends PagePane {
             Ui.warn("提示", "Team 账号需要填写 Org ID");
             return;
         }
+        persistTestModelQuietly();
         try {
             context.services().codex().testAccount(account, modelField.getText().trim());
             Ui.info("提示", "已启动 codex chat，请在新终端中验证账号是否可用。");
         } catch (Exception e) {
             Ui.error("失败", e.getMessage());
+        }
+    }
+
+    private void persistTestModelQuietly() {
+        String model = modelField.getText().trim();
+        if (model.isBlank()) {
+            model = DEFAULT_TEST_MODEL;
+            modelField.setText(model);
+        }
+        try {
+            context.services().store().saveAccountTestModel(model);
+        } catch (Exception ignored) {
         }
     }
 

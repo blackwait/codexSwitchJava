@@ -268,30 +268,6 @@ public abstract class BaseSupport {
         }
     }
 
-    public static List<String> quotedValues(String body) {
-        Matcher matcher = Pattern.compile("[\"']([^\"']+)[\"']").matcher(body);
-        List<String> values = new ArrayList<>();
-        while (matcher.find()) {
-            values.add(matcher.group(1));
-        }
-        return values;
-    }
-
-    public static List<String> mergeUnique(List<String> first, List<String> second) {
-        List<String> values = new ArrayList<>();
-        for (String item : first) {
-            if (item != null && values.stream().noneMatch(existing -> existing.equalsIgnoreCase(item))) {
-                values.add(item);
-            }
-        }
-        for (String item : second) {
-            if (item != null && values.stream().noneMatch(existing -> existing.equalsIgnoreCase(item))) {
-                values.add(item);
-            }
-        }
-        return values;
-    }
-
     @SuppressWarnings("unchecked")
     public static Map<String, Object> asMap(Object value) {
         if (value instanceof Map<?, ?> map) {
@@ -388,16 +364,6 @@ public abstract class BaseSupport {
             this.version = version;
             this.path = path;
             this.message = message;
-        }
-    }
-
-    protected static class PatchResult {
-        public final String content;
-        public final boolean ok;
-
-        public PatchResult(String content, boolean ok) {
-            this.content = content;
-            this.ok = ok;
         }
     }
 

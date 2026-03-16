@@ -7,6 +7,7 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
+import javafx.scene.control.Labeled;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
@@ -43,7 +44,12 @@ public final class Ui {
     public static Button button(String text) {
         Button button = new Button(text);
         button.getStyleClass().add("button");
+        UiIcons.apply(button, text, 13);
         return button;
+    }
+
+    public static void decorateActionIcon(Labeled labeled, String text) {
+        UiIcons.apply(labeled, text, 12);
     }
 
     public static Label title(String text) {
