@@ -10,7 +10,6 @@ import java.nio.file.StandardOpenOption;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 public class OpencodeService extends BaseSupport {
 
@@ -76,52 +75,6 @@ public class OpencodeService extends BaseSupport {
         data.put("provider", provider);
         data.putIfAbsent("$schema", "https://opencode.ai/config.json");
         return data;
-    }
-
-    public Object maskApiKeys(Object value) {
-        if (value instanceof Map<?, ?> map) {
-            Map<String, Object> masked = new LinkedHashMap<>();
-            for (Map.Entry<?, ?> entry : map.entrySet()) {
-                String key = String.valueOf(entry.getKey());
-                Object raw = entry.getValue();
-                if ("apiKey".equals(key) && raw instanceof String text && !text.isBlank()) {
-                    masked.put(key, "********");
-                } else {
-                    masked.put(key, maskApiKeys(raw));
-                }
-            }
-            return masked;
-        }
-        if (value instanceof List<?> list) {
-            return list.stream().map(this::maskApiKeys).collect(Collectors.toList());
-        }
-        return value;
-    }
-
-    public Object restoreApiKeys(Object current, Object raw) {
-        if (current instanceof Map<?, ?> currentMap) {
-            Map<String, Object> restored = new LinkedHashMap<>();
-            Map<String, Object> rawMap = asMap(raw);
-            for (Map.Entry<?, ?> entry : currentMap.entrySet()) {
-                String key = String.valueOf(entry.getKey());
-                Object value = entry.getValue();
-                if ("apiKey".equals(key) && "********".equals(String.valueOf(value))) {
-                    restored.put(key, rawMap.get(key));
-                } else {
-                    restored.put(key, restoreApiKeys(value, rawMap.get(key)));
-                }
-            }
-            return restored;
-        }
-        if (current instanceof List<?> currentList) {
-            List<Object> rawList = asList(raw);
-            List<Object> restored = new java.util.ArrayList<>();
-            for (int index = 0; index < currentList.size(); index++) {
-                restored.add(restoreApiKeys(currentList.get(index), index < rawList.size() ? rawList.get(index) : null));
-            }
-            return restored;
-        }
-        return current;
     }
 
     public VersionInfo getLocalVersion(CodexService codexService) {

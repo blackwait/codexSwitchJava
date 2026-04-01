@@ -97,26 +97,19 @@ public class CodexService extends BaseSupport {
     }
 
     public void testAccount(Account account, String model) throws IOException {
-        String executable = findCodexExecutable();
-        if (isBlank(executable)) {
-            throw new IOException("未检测到 codex 命令");
+        launchAccountTest(prepareAccountTestLaunch(account, model));
+    }
+
+    public int testAccounts(List<Account> accounts, String model) throws IOException {
+        int started = 0;
+        for (Account account : accounts) {
+            if (!isTestableAccount(account)) {
+                continue;
+            }
+            testAccount(account, model);
+            started++;
         }
-        ProcessBuilder builder;
-        if (isWindows()) {
-            builder = new ProcessBuilder("cmd.exe", "/c", "start", "", executable, "chat", "-m", firstNonBlank(model, "gpt-5.2-codex"));
-        } else {
-            startInteractiveShell(
-                List.of(executable, "chat", "-m", firstNonBlank(model, "gpt-5.2-codex")),
-                null,
-                buildAccountEnv(account)
-            );
-            return;
-        }
-        builder.environment().putAll(buildAccountEnv(account));
-        if (!account.isTeam() || isBlank(account.getOrgId())) {
-            builder.environment().remove("OPENAI_ORG_ID");
-        }
-        builder.start();
+        return started;
     }
 
     public void updateCodex() throws IOException {
@@ -252,6 +245,36 @@ public class CodexService extends BaseSupport {
         return lines.get(0).trim();
     }
 
+    AccountTestLaunch prepareAccountTestLaunch(Account account, String model) throws IOException {
+        String executable = findCodexExecutable();
+        if (isBlank(executable)) {
+            throw new IOException("未检测到 codex 命令");
+        }
+        return new AccountTestLaunch(buildCodexChatCommand(executable, model), buildAccountEnv(account));
+    }
+
+    void launchAccountTest(AccountTestLaunch launch) throws IOException {
+        startInteractiveShell(launch.command(), null, launch.environment());
+    }
+
+    private List<String> buildCodexChatCommand(String executable, String model) {
+        String normalizedModel = firstNonBlank(model, "gpt-5.2-codex");
+        if (isWindows() && executable.toLowerCase(Locale.ROOT).endsWith(".ps1")) {
+            return List.of("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", executable, "chat", "-m", normalizedModel);
+        }
+        return List.of(executable, "chat", "-m", normalizedModel);
+    }
+
+    private boolean isTestableAccount(Account account) {
+        if (account == null) {
+            return false;
+        }
+        if (isBlank(account.getBaseUrl()) || isBlank(account.getApiKey())) {
+            return false;
+        }
+        return !account.isTeam() || !isBlank(account.getOrgId());
+    }
+
     private Map<String, String> buildAccountEnv(Account account) {
         java.util.LinkedHashMap<String, String> env = new java.util.LinkedHashMap<>();
         env.put("OPENAI_API_KEY", firstNonBlank(account.getApiKey(), ""));
@@ -320,5 +343,8 @@ public class CodexService extends BaseSupport {
             return normalized;
         }
         return "";
+    }
+
+    static record AccountTestLaunch(List<String> command, Map<String, String> environment) {
     }
 }

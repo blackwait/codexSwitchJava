@@ -1,6 +1,8 @@
 package com.codexswitcher.service;
 
 import com.codexswitcher.model.DiagnosisResult;
+import com.codexswitcher.model.Account;
+import com.codexswitcher.model.AccountProbeStatus;
 import com.codexswitcher.model.ProbeResult;
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -24,6 +26,34 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 
 public class NetworkService extends BaseSupport {
+
+    public List<AccountProbeStatus> probeAccounts(List<Account> accounts, String model, int timeoutSeconds) {
+        List<AccountProbeStatus> results = new ArrayList<>();
+        for (Account account : accounts) {
+            results.add(probeAccount(account, model, timeoutSeconds));
+        }
+        return results;
+    }
+
+    public AccountProbeStatus probeAccount(Account account, String model, int timeoutSeconds) {
+        if (account == null) {
+            return new AccountProbeStatus("", false, false, "失败", "账号不存在");
+        }
+        if (isBlank(account.getBaseUrl()) || isBlank(account.getApiKey())) {
+            return new AccountProbeStatus(account.getName(), account.isTeam(), false, "失败", "Base URL 或 API Key 为空");
+        }
+        if (account.isTeam() && isBlank(account.getOrgId())) {
+            return new AccountProbeStatus(account.getName(), true, false, "失败", "Team 账号缺少 Org ID");
+        }
+        try {
+            DiagnosisResult diagnosis = probeAccountEndpoints(account, model, timeoutSeconds);
+            boolean ok = !isBlank(diagnosis.getSuccessEndpoint()) || Boolean.TRUE.equals(diagnosis.getModelSupported());
+            String detail = firstNonBlank(diagnosis.getDetail(), diagnosis.getSummaryDetail(), diagnosis.getConclusion(), "-");
+            return new AccountProbeStatus(account.getName(), account.isTeam(), ok, ok ? "可用" : "失败", detail);
+        } catch (Exception e) {
+            return new AccountProbeStatus(account.getName(), account.isTeam(), false, "失败", firstNonBlank(e.getMessage(), "检测异常"));
+        }
+    }
 
     public DiagnosisResult probeEndpoints(String base, String apiKey, String orgId, String model, int timeoutSeconds) throws IOException, InterruptedException {
         String cleanedBase = trimToEmpty(base).replaceAll("/+$", "");
@@ -149,6 +179,10 @@ public class NetworkService extends BaseSupport {
         }
         result.setDetail(String.join(System.lineSeparator(), detail));
         return result;
+    }
+
+    DiagnosisResult probeAccountEndpoints(Account account, String model, int timeoutSeconds) throws IOException, InterruptedException {
+        return probeEndpoints(account.getBaseUrl(), account.getApiKey(), account.getOrgId(), model, timeoutSeconds);
     }
 
     public ProbeResult probeSingleModel(String base, String apiKey, String model, int timeoutSeconds) throws IOException, InterruptedException {

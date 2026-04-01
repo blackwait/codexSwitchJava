@@ -18,7 +18,7 @@ import java.util.TreeSet;
 
 public class StoreService extends BaseSupport {
 
-    private static final String DEFAULT_ACCOUNT_TEST_MODEL = "gpt-5.2-codex";
+    private static final String DEFAULT_ACCOUNT_TEST_MODEL = "gpt-5.3-codex";
 
     public ObjectNode loadStoreNode() {
         ObjectNode root;

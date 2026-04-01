@@ -74,8 +74,8 @@ public class OpencodePage extends PagePane {
         editor.setText("加载中...");
         context.runAsync(() -> {
             Map<String, Object> config = context.services().opencode().loadConfig();
-            String masked = BaseSupport.JSON.writeValueAsString(context.services().opencode().maskApiKeys(config));
-            return new Object[]{config, masked};
+            String text = BaseSupport.JSON.writeValueAsString(config);
+            return new Object[]{config, text};
         }, result -> {
             rawConfig = BaseSupport.asMap(result[0]);
             editor.setText(String.valueOf(result[1]));
@@ -93,7 +93,7 @@ public class OpencodePage extends PagePane {
         }
         try {
             rawConfig = context.services().opencode().updateConfigWithAccount(rawConfig, account);
-            editor.setText(BaseSupport.JSON.writeValueAsString(context.services().opencode().maskApiKeys(rawConfig)));
+            editor.setText(BaseSupport.JSON.writeValueAsString(rawConfig));
         } catch (Exception e) {
             Ui.error("失败", e.getMessage());
         }
@@ -103,8 +103,8 @@ public class OpencodePage extends PagePane {
         try {
             Map<String, Object> parsed = BaseSupport.JSON.readValue(editor.getText(), new com.fasterxml.jackson.core.type.TypeReference<LinkedHashMap<String, Object>>() {
             });
-            Object restored = context.services().opencode().restoreApiKeys(parsed, rawConfig);
-            context.services().opencode().saveConfig(BaseSupport.asMap(restored));
+            rawConfig = new LinkedHashMap<>(parsed);
+            context.services().opencode().saveConfig(rawConfig);
             Ui.info("完成", "opencode.json 已保存");
         } catch (Exception e) {
             Ui.error("失败", e.getMessage());

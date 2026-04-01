@@ -1,41 +1,49 @@
 package com.codexswitcher.ui.page;
 
 import com.codexswitcher.model.Account;
+import com.codexswitcher.model.AccountProbeStatus;
 import com.codexswitcher.ui.AppContext;
 import com.codexswitcher.ui.PagePane;
 import com.codexswitcher.ui.Ui;
 import javafx.collections.FXCollections;
+import javafx.geometry.Pos;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
-import javafx.scene.control.PasswordField;
 import javafx.scene.control.RadioButton;
 import javafx.scene.control.TextField;
+import javafx.scene.control.Tooltip;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.scene.paint.Color;
+import javafx.scene.shape.Circle;
 import javafx.stage.FileChooser;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 public class AccountPage extends PagePane {
 
-    private static final String DEFAULT_TEST_MODEL = "gpt-5.2-codex";
+    private static final String DEFAULT_TEST_MODEL = "gpt-5.3-codex";
+    private static final int PROBE_TIMEOUT_SECONDS = 30;
 
     private final Label currentLabel = new Label("未选择");
     private final ListView<Account> listView = new ListView<>();
     private final TextField nameField = new TextField();
     private final TextField baseField = new TextField();
-    private final PasswordField keyField = new PasswordField();
+    private final TextField keyField = new TextField();
     private final TextField orgField = new TextField();
     private final TextField modelField = new TextField(DEFAULT_TEST_MODEL);
     private final RadioButton teamRadio = new RadioButton("Team 账号");
     private final RadioButton officialRadio = new RadioButton("ChatGPT 官方账号");
     private final RadioButton proxyRadio = new RadioButton("中转账号");
     private final Label statusLabel = new Label();
+    private final Map<String, ProbeState> probeStates = new LinkedHashMap<>();
 
     public AccountPage(AppContext context) {
         super(context);
@@ -46,7 +54,24 @@ public class AccountPage extends PagePane {
             @Override
             protected void updateItem(Account item, boolean empty) {
                 super.updateItem(item, empty);
-                setText(empty || item == null ? "" : item.getDisplayText());
+                if (empty || item == null) {
+                    setText("");
+                    setGraphic(null);
+                    setTooltip(null);
+                    return;
+                }
+                ProbeState state = probeStates.getOrDefault(accountKey(item), ProbeState.idle());
+                Circle light = new Circle(6, state.color());
+                Label title = new Label(item.getDisplayText());
+                title.setWrapText(true);
+                Label sub = new Label(state.summary());
+                sub.setStyle("-fx-font-size: 11px;");
+                HBox row = new HBox(8, light, new VBox(2, title, sub));
+                row.setAlignment(Pos.CENTER_LEFT);
+                HBox.setHgrow(row.getChildren().get(1), Priority.ALWAYS);
+                setText(null);
+                setGraphic(row);
+                setTooltip(state.detail().isBlank() ? null : new Tooltip(state.detail()));
             }
         });
         listView.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, newValue) -> populate(newValue));
@@ -56,6 +81,7 @@ public class AccountPage extends PagePane {
         officialRadio.setToggleGroup(group);
         proxyRadio.setToggleGroup(group);
         proxyRadio.setSelected(true);
+        modelField.textProperty().addListener((obs, oldValue, newValue) -> persistNonBlankTestModelQuietly(newValue));
         modelField.focusedProperty().addListener((obs, oldValue, focused) -> {
             if (Boolean.FALSE.equals(focused)) {
                 persistTestModelQuietly();
@@ -97,12 +123,14 @@ public class AccountPage extends PagePane {
         saveButton.setOnAction(event -> saveAccount());
         var clearButton = Ui.button("清空");
         clearButton.setOnAction(event -> clearForm());
-        var testButton = Ui.button("账号测试");
+        var testButton = Ui.button("账号检测");
         testButton.setOnAction(event -> testAccount());
+        var batchTestButton = Ui.button("批量检测全部");
+        batchTestButton.setOnAction(event -> testAllAccounts());
 
         VBox left = Ui.card("账号列表", listView, Ui.row(applyButton, deleteButton, refreshButton), Ui.row(exportButton, importButton));
         left.setPrefWidth(360);
-        VBox right = Ui.card("新增/更新账号", form, Ui.row(saveButton, clearButton, testButton), statusLabel);
+        VBox right = Ui.card("新增/更新账号", form, Ui.row(saveButton, clearButton, testButton, batchTestButton), statusLabel);
         HBox body = new HBox(12, left, right);
         HBox.setHgrow(right, Priority.ALWAYS);
 
@@ -228,21 +256,42 @@ public class AccountPage extends PagePane {
 
     private void testAccount() {
         Account account = buildFormAccount();
-        if (account.getBaseUrl().isBlank() || account.getApiKey().isBlank()) {
-            Ui.warn("提示", "Base URL 和 API Key 不能为空");
-            return;
-        }
-        if (account.isTeam() && account.getOrgId().isBlank()) {
-            Ui.warn("提示", "Team 账号需要填写 Org ID");
+        persistTestModelQuietly();
+        markPending(account);
+        statusLabel.setText("检测中：" + account.getName());
+        context.runAsync(
+            () -> context.services().network().probeAccount(account, modelField.getText().trim(), PROBE_TIMEOUT_SECONDS),
+            result -> applyProbeResult(result, true),
+            error -> Ui.error("失败", error.getMessage())
+        );
+    }
+
+    private void testAllAccounts() {
+        var accounts = new java.util.ArrayList<>(listView.getItems());
+        if (accounts.isEmpty()) {
+            Ui.warn("提示", "账号列表为空");
             return;
         }
         persistTestModelQuietly();
-        try {
-            context.services().codex().testAccount(account, modelField.getText().trim());
-            Ui.info("提示", "已启动 codex chat，请在新终端中验证账号是否可用。");
-        } catch (Exception e) {
-            Ui.error("失败", e.getMessage());
-        }
+        accounts.forEach(this::markPending);
+        statusLabel.setText("批量检测中...");
+        context.runAsync(
+            () -> context.services().network().probeAccounts(accounts, modelField.getText().trim(), PROBE_TIMEOUT_SECONDS),
+            results -> {
+                int okCount = 0;
+                for (AccountProbeStatus result : results) {
+                    applyProbeResult(result, false);
+                    if (result.ok()) {
+                        okCount++;
+                    }
+                }
+                int failCount = results.size() - okCount;
+                String message = "批量检测完成：成功 " + okCount + "，失败 " + failCount;
+                statusLabel.setText(message);
+                Ui.info("完成", message);
+            },
+            error -> Ui.error("失败", error.getMessage())
+        );
     }
 
     private void persistTestModelQuietly() {
@@ -255,6 +304,39 @@ public class AccountPage extends PagePane {
             context.services().store().saveAccountTestModel(model);
         } catch (Exception ignored) {
         }
+    }
+
+    private void persistNonBlankTestModelQuietly(String model) {
+        String value = model == null ? "" : model.trim();
+        if (value.isBlank()) {
+            return;
+        }
+        try {
+            context.services().store().saveAccountTestModel(value);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void markPending(Account account) {
+        probeStates.put(accountKey(account), ProbeState.pending());
+        listView.refresh();
+    }
+
+    private void applyProbeResult(AccountProbeStatus result, boolean updateStatusText) {
+        probeStates.put(accountKey(result.accountName(), result.team()), ProbeState.from(result));
+        listView.refresh();
+        if (updateStatusText) {
+            String prefix = result.ok() ? "检测通过：" : "检测失败：";
+            statusLabel.setText(prefix + result.accountName() + " - " + result.summary());
+        }
+    }
+
+    private String accountKey(Account account) {
+        return accountKey(account.getName(), account.isTeam());
+    }
+
+    private String accountKey(String name, boolean team) {
+        return (team ? "team:" : "profile:") + (name == null ? "" : name.trim());
     }
 
     private void exportAccounts() {
@@ -294,6 +376,24 @@ public class AccountPage extends PagePane {
             statusLabel.setText("批量导入完成：成功 " + result.imported + "，跳过 " + result.skipped);
         } catch (Exception e) {
             Ui.error("失败", e.getMessage());
+        }
+    }
+
+    private record ProbeState(Color color, String summary, String detail) {
+        private static ProbeState idle() {
+            return new ProbeState(Color.web("#9aa3b2"), "未检测", "");
+        }
+
+        private static ProbeState pending() {
+            return new ProbeState(Color.web("#f0ad4e"), "检测中...", "");
+        }
+
+        private static ProbeState from(AccountProbeStatus status) {
+            return new ProbeState(
+                status.ok() ? Color.web("#1a9a65") : Color.web("#d44c5d"),
+                status.ok() ? "可用" : "失败",
+                status.detail()
+            );
         }
     }
 }
