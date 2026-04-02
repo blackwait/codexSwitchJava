@@ -37,6 +37,7 @@ public class AccountPage extends PagePane {
     private final TextField nameField = new TextField();
     private final TextField baseField = new TextField();
     private final TextField keyField = new TextField();
+    private final TextField accountModelField = new TextField();
     private final TextField orgField = new TextField();
     private final TextField modelField = new TextField(DEFAULT_TEST_MODEL);
     private final RadioButton teamRadio = new RadioButton("Team 账号");
@@ -99,13 +100,16 @@ public class AccountPage extends PagePane {
         form.add(baseField, 1, 2);
         form.add(new Label("API Key"), 0, 3);
         form.add(keyField, 1, 3);
-        form.add(new Label("Org ID"), 0, 4);
-        form.add(orgField, 1, 4);
-        form.add(new Label("测试模型"), 0, 5);
-        form.add(modelField, 1, 5);
+        form.add(new Label("账号模型"), 0, 4);
+        form.add(accountModelField, 1, 4);
+        form.add(new Label("Org ID"), 0, 5);
+        form.add(orgField, 1, 5);
+        form.add(new Label("测试模型"), 0, 6);
+        form.add(modelField, 1, 6);
         GridPane.setHgrow(nameField, Priority.ALWAYS);
         GridPane.setHgrow(baseField, Priority.ALWAYS);
         GridPane.setHgrow(keyField, Priority.ALWAYS);
+        GridPane.setHgrow(accountModelField, Priority.ALWAYS);
         GridPane.setHgrow(orgField, Priority.ALWAYS);
         GridPane.setHgrow(modelField, Priority.ALWAYS);
 
@@ -173,6 +177,7 @@ public class AccountPage extends PagePane {
         nameField.setText(account.getName());
         baseField.setText(account.getBaseUrl());
         keyField.setText(account.getApiKey());
+        accountModelField.setText(account.getModelName());
         orgField.setText(account.getOrgId());
         if (account.isTeam()) {
             teamRadio.setSelected(true);
@@ -186,7 +191,8 @@ public class AccountPage extends PagePane {
     private Account buildFormAccount() {
         boolean team = teamRadio.isSelected();
         String type = team ? "team" : officialRadio.isSelected() ? "official" : "proxy";
-        return new Account(nameField.getText().trim(), baseField.getText().trim(), keyField.getText().trim(), orgField.getText().trim(), team, type);
+        return new Account(nameField.getText().trim(), baseField.getText().trim(), keyField.getText().trim(),
+            accountModelField.getText().trim(), orgField.getText().trim(), team, type);
     }
 
     private void applySelected() {
@@ -250,6 +256,7 @@ public class AccountPage extends PagePane {
         nameField.clear();
         baseField.clear();
         keyField.clear();
+        accountModelField.clear();
         orgField.clear();
         proxyRadio.setSelected(true);
     }

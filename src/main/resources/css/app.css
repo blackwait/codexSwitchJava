@@ -9,6 +9,41 @@
     -fx-padding: 16;
 }
 
+.frame-root {
+    -fx-spacing: 12;
+}
+
+.toolbar-box {
+    -fx-background-color: rgba(255,255,255,0.42);
+    -fx-border-color: rgba(255,255,255,0.9);
+    -fx-border-width: 1;
+    -fx-border-radius: 12;
+    -fx-background-radius: 12;
+    -fx-padding: 12 14;
+    -fx-alignment: center-left;
+}
+
+.toolbar-title {
+    -fx-font-size: 18px;
+    -fx-font-weight: 800;
+    -fx-text-fill: #3d3457;
+}
+
+.toolbar-subtitle {
+    -fx-font-size: 12px;
+    -fx-text-fill: #726d8e;
+}
+
+.toolbar-menu {
+    -fx-background-color: rgba(255,255,255,0.76);
+    -fx-border-color: #6e78ff;
+    -fx-border-width: 1;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-text-fill: #5d52ca;
+    -fx-font-weight: 700;
+}
+
 .shell-root {
     -fx-background-color: transparent;
 }

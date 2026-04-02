@@ -76,6 +76,7 @@ public final class UiIcons {
         LABEL_ICON_MAP.put("Skill 管理", "wrench-screwdriver");
         LABEL_ICON_MAP.put("中转站接口", "globe-alt");
         LABEL_ICON_MAP.put("OpenAI官网状态", "signal");
+        LABEL_ICON_MAP.put("云端同步", "globe-alt");
     }
 
     private UiIcons() {

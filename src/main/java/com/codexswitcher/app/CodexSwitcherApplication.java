@@ -19,6 +19,7 @@ public class CodexSwitcherApplication extends Application {
         AppServices services = new AppServices();
         state.setActiveAccount(services.store().getActiveAccount());
         state.setVscodeInstallDir(services.store().loadVscodeInstallDir());
+        state.setCloudSyncSettings(services.store().loadCloudSyncSettings());
 
         mainView = new MainView(state, services);
         Scene scene = new Scene(mainView, 1120, 780);

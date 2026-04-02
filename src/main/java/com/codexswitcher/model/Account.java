@@ -5,6 +5,7 @@ public class Account {
     private String name;
     private String baseUrl;
     private String apiKey;
+    private String modelName;
     private String orgId;
     private boolean team;
     private String accountType;
@@ -13,9 +14,14 @@ public class Account {
     }
 
     public Account(String name, String baseUrl, String apiKey, String orgId, boolean team, String accountType) {
+        this(name, baseUrl, apiKey, "", orgId, team, accountType);
+    }
+
+    public Account(String name, String baseUrl, String apiKey, String modelName, String orgId, boolean team, String accountType) {
         this.name = name;
         this.baseUrl = baseUrl;
         this.apiKey = apiKey;
+        this.modelName = modelName;
         this.orgId = orgId;
         this.team = team;
         this.accountType = accountType;
@@ -45,6 +51,14 @@ public class Account {
         this.apiKey = apiKey;
     }
 
+    public String getModelName() {
+        return modelName;
+    }
+
+    public void setModelName(String modelName) {
+        this.modelName = modelName;
+    }
+
     public String getOrgId() {
         return orgId;
     }
@@ -71,6 +85,7 @@ public class Account {
 
     public String getDisplayText() {
         String prefix = team ? "[Team] " : "[" + ("official".equals(accountType) ? "官方" : "中转") + "] ";
-        return prefix + name + " -> " + baseUrl;
+        String modelText = modelName == null || modelName.isBlank() ? "" : " (" + modelName + ")";
+        return prefix + name + " -> " + baseUrl + modelText;
     }
 }
