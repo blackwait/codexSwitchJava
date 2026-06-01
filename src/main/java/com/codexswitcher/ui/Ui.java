@@ -8,8 +8,10 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
 import javafx.scene.control.Labeled;
+import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TextInputDialog;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -102,6 +104,26 @@ public final class Ui {
         TextField field = new TextField();
         field.setEditable(false);
         return field;
+    }
+
+    public static String promptText(String title, String header, String defaultValue) {
+        TextInputDialog dialog = new TextInputDialog(defaultValue == null ? "" : defaultValue);
+        dialog.setTitle(title);
+        dialog.setHeaderText(header);
+        dialog.setContentText(null);
+        return dialog.showAndWait().orElse(null);
+    }
+
+    public static String promptPassword(String title, String header) {
+        javafx.scene.control.Dialog<String> dialog = new javafx.scene.control.Dialog<>();
+        dialog.setTitle(title);
+        dialog.setHeaderText(header);
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        PasswordField field = new PasswordField();
+        field.setPromptText("请输入密钥");
+        dialog.getDialogPane().setContent(field);
+        dialog.setResultConverter(buttonType -> buttonType == ButtonType.OK ? field.getText() : null);
+        return dialog.showAndWait().orElse(null);
     }
 
     private static void alert(Alert.AlertType type, String title, String message) {

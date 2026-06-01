@@ -1,6 +1,7 @@
 package com.codexswitcher.service;
 
 import com.codexswitcher.model.Account;
+import com.codexswitcher.model.CloudSyncSettings;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -40,6 +41,9 @@ public class StoreService extends BaseSupport {
         if (!root.has("active")) {
             root.putNull("active");
         }
+        if (!(root.get("cloud_sync") instanceof ObjectNode)) {
+            root.set("cloud_sync", JSON.createObjectNode());
+        }
         return root;
     }
 
@@ -59,6 +63,7 @@ public class StoreService extends BaseSupport {
                 name,
                 node.path("base_url").asText(""),
                 node.path("api_key").asText(""),
+                node.path("model_name").asText(""),
                 node.path("org_id").asText(""),
                 true,
                 "team"
@@ -72,7 +77,7 @@ public class StoreService extends BaseSupport {
             String accountType = node.path("account_type").asText(
                 "https://api.openai.com/v1".equals(baseUrl) ? "official" : "proxy"
             );
-            accounts.add(new Account(name, baseUrl, node.path("api_key").asText(""), "", false, accountType));
+            accounts.add(new Account(name, baseUrl, node.path("api_key").asText(""), node.path("model_name").asText(""), "", false, accountType));
         }
         accounts.sort(Comparator.comparing(Account::isTeam).reversed().thenComparing(Account::getName, String.CASE_INSENSITIVE_ORDER));
         return accounts;
@@ -89,7 +94,7 @@ public class StoreService extends BaseSupport {
             JsonNode node = root.with("teams").path(name);
             if (node.isObject()) {
                 return new Account(name, node.path("base_url").asText(""), node.path("api_key").asText(""),
-                    node.path("org_id").asText(""), true, "team");
+                    node.path("model_name").asText(""), node.path("org_id").asText(""), true, "team");
             }
             return null;
         }
@@ -99,7 +104,7 @@ public class StoreService extends BaseSupport {
             String accountType = node.path("account_type").asText(
                 "https://api.openai.com/v1".equals(baseUrl) ? "official" : "proxy"
             );
-            return new Account(active, baseUrl, node.path("api_key").asText(""), "", false, accountType);
+            return new Account(active, baseUrl, node.path("api_key").asText(""), node.path("model_name").asText(""), "", false, accountType);
         }
         return null;
     }
@@ -139,6 +144,10 @@ public class StoreService extends BaseSupport {
 
     public BatchImportResult importAccounts(Path source) throws IOException {
         JsonNode rootNode = JSON.readTree(source.toFile());
+        return importAccounts(rootNode);
+    }
+
+    public BatchImportResult importAccounts(JsonNode rootNode) throws IOException {
         ParsedBatch parsedBatch = parseBatch(rootNode);
         ObjectNode root = loadStoreNode();
         root.with("profiles").removeAll();
@@ -158,6 +167,18 @@ public class StoreService extends BaseSupport {
         boolean restoredActive = restoreActive(root, parsedBatch.active);
         saveStoreNode(root);
         return new BatchImportResult(parsedBatch.accounts.size(), imported, skipped, restoredActive);
+    }
+
+    public CloudSyncApplyResult applyCloudAccounts(JsonNode rootNode) throws IOException {
+        BatchImportResult importResult = importAccounts(rootNode);
+        Account activeAccount = getActiveAccount();
+        boolean activeApplied = false;
+        if (importResult.restoredActive && activeAccount != null) {
+            applyAccountConfig(activeAccount);
+            activeApplied = true;
+        }
+        return new CloudSyncApplyResult(importResult.total, importResult.imported, importResult.skipped,
+            importResult.restoredActive, activeApplied, activeAccount == null ? "" : activeAccount.getName());
     }
 
     public void deleteAccount(Account account) throws IOException {
@@ -180,8 +201,31 @@ public class StoreService extends BaseSupport {
 
     public void applyAccountConfig(Account account) throws IOException {
         updateConfigBaseUrl(account.getBaseUrl());
+        updateConfigModel(account.getModelName());
         updateAuth(account.getApiKey(), account.isTeam() ? account.getOrgId() : "");
         setActiveAccount(account);
+    }
+
+    public CloudSyncSettings loadCloudSyncSettings() {
+        JsonNode node = loadStoreNode().path("cloud_sync");
+        CloudSyncSettings settings = new CloudSyncSettings();
+        settings.setUnlocked(node.path("unlocked").asBoolean(false));
+        settings.setEnabled(node.path("enabled").asBoolean(false));
+        settings.setServerUrl(trimToEmpty(node.path("server_url").asText("")));
+        return settings;
+    }
+
+    public void saveCloudSyncSettings(CloudSyncSettings settings) throws IOException {
+        ObjectNode root = loadStoreNode();
+        ObjectNode node = root.with("cloud_sync");
+        node.put("unlocked", settings != null && settings.isUnlocked());
+        node.put("enabled", settings != null && settings.isEnabled());
+        if (settings == null || isBlank(settings.getServerUrl())) {
+            node.putNull("server_url");
+        } else {
+            node.put("server_url", trimToEmpty(settings.getServerUrl()));
+        }
+        saveStoreNode(root);
     }
 
     public void saveVscodeInstallDir(Path path) throws IOException {
@@ -318,6 +362,46 @@ public class StoreService extends BaseSupport {
         writeText(CONFIG_PATH, output);
     }
 
+    private void updateConfigModel(String modelName) throws IOException {
+        String value = trimToEmpty(modelName);
+        if (isBlank(value)) {
+            return;
+        }
+        String text = readText(CONFIG_PATH);
+        String lineEnding = text.contains("\r\n") ? "\r\n" : "\n";
+        List<String> lines = new ArrayList<>(List.of(text.split("\\R", -1)));
+        if (lines.size() == 1 && lines.get(0).isEmpty()) {
+            lines.clear();
+        }
+        var sectionPattern = java.util.regex.Pattern.compile("^\\s*\\[([^\\]]+)]\\s*$");
+        var modelPattern = java.util.regex.Pattern.compile("^\\s*model\\s*=");
+        Integer modelIndex = null;
+        Integer firstSectionIndex = null;
+        for (int index = 0; index < lines.size(); index++) {
+            String line = lines.get(index);
+            if (sectionPattern.matcher(line.trim()).matches()) {
+                firstSectionIndex = index;
+                break;
+            }
+            if (modelPattern.matcher(line.trim()).find()) {
+                modelIndex = index;
+            }
+        }
+        String targetLine = "model = \"" + value + "\"";
+        if (modelIndex != null) {
+            lines.set(modelIndex, targetLine);
+        } else if (firstSectionIndex != null) {
+            lines.add(firstSectionIndex, targetLine);
+        } else {
+            lines.add(targetLine);
+        }
+        String output = String.join(lineEnding, lines);
+        if (!output.endsWith(lineEnding)) {
+            output += lineEnding;
+        }
+        writeText(CONFIG_PATH, output);
+    }
+
     private void upsertAccount(ObjectNode root, Account account) {
         ObjectNode profiles = root.with("profiles");
         ObjectNode teams = root.with("teams");
@@ -326,6 +410,7 @@ public class StoreService extends BaseSupport {
             ObjectNode team = JSON.createObjectNode();
             team.put("base_url", account.getBaseUrl());
             team.put("api_key", account.getApiKey());
+            team.put("model_name", trimToEmpty(account.getModelName()));
             team.put("org_id", account.getOrgId());
             teams.set(account.getName(), team);
         } else {
@@ -333,6 +418,7 @@ public class StoreService extends BaseSupport {
             ObjectNode profile = JSON.createObjectNode();
             profile.put("base_url", account.getBaseUrl());
             profile.put("api_key", account.getApiKey());
+            profile.put("model_name", trimToEmpty(account.getModelName()));
             profile.put("account_type", firstNonBlank(account.getAccountType(), "proxy"));
             profiles.set(account.getName(), profile);
         }
@@ -383,6 +469,7 @@ public class StoreService extends BaseSupport {
                     name,
                     node.path("base_url").asText(""),
                     node.path("api_key").asText(""),
+                    node.path("model_name").asText(""),
                     node.path("org_id").asText(""),
                     true,
                     "team"
@@ -397,7 +484,7 @@ public class StoreService extends BaseSupport {
                 String accountType = node.path("account_type").asText(
                     "https://api.openai.com/v1".equals(baseUrl) ? "official" : "proxy"
                 );
-                accounts.add(new Account(name, baseUrl, node.path("api_key").asText(""), "", false, accountType));
+                accounts.add(new Account(name, baseUrl, node.path("api_key").asText(""), node.path("model_name").asText(""), "", false, accountType));
             });
         }
         return accounts;
@@ -410,13 +497,14 @@ public class StoreService extends BaseSupport {
         String name = readText(node, "name");
         String baseUrl = readText(node, "baseUrl", "base_url");
         String apiKey = readText(node, "apiKey", "api_key");
+        String modelName = readText(node, "modelName", "model_name", "model");
         String orgId = readText(node, "orgId", "org_id");
         boolean team = readBoolean(node, "team") || "team".equalsIgnoreCase(readText(node, "accountType", "account_type"));
         String accountType = readText(node, "accountType", "account_type");
         if (!team && isBlank(accountType)) {
             accountType = "https://api.openai.com/v1".equals(baseUrl) ? "official" : "proxy";
         }
-        return new Account(name, baseUrl, apiKey, orgId, team, team ? "team" : accountType);
+        return new Account(name, baseUrl, apiKey, modelName, orgId, team, team ? "team" : accountType);
     }
 
     private String readText(JsonNode node, String... keys) {
@@ -466,6 +554,7 @@ public class StoreService extends BaseSupport {
         String name = trimToEmpty(account.getName());
         String baseUrl = trimToEmpty(account.getBaseUrl());
         String apiKey = trimToEmpty(account.getApiKey());
+        String modelName = trimToEmpty(account.getModelName());
         String orgId = trimToEmpty(account.getOrgId());
         boolean team = account.isTeam();
         String accountType = trimToEmpty(account.getAccountType());
@@ -480,7 +569,7 @@ public class StoreService extends BaseSupport {
         } else if (isBlank(accountType)) {
             accountType = "https://api.openai.com/v1".equals(baseUrl) ? "official" : "proxy";
         }
-        return new Account(name, baseUrl, apiKey, orgId, team, accountType);
+        return new Account(name, baseUrl, apiKey, modelName, orgId, team, accountType);
     }
 
     private boolean restoreActive(ObjectNode root, ActiveAccount active) {
@@ -543,6 +632,17 @@ public class StoreService extends BaseSupport {
             this.imported = imported;
             this.skipped = skipped;
             this.restoredActive = restoredActive;
+        }
+    }
+
+    public static class CloudSyncApplyResult extends BatchImportResult {
+        public final boolean activeApplied;
+        public final String activeAccountName;
+
+        public CloudSyncApplyResult(int total, int imported, int skipped, boolean restoredActive, boolean activeApplied, String activeAccountName) {
+            super(total, imported, skipped, restoredActive);
+            this.activeApplied = activeApplied;
+            this.activeAccountName = activeAccountName;
         }
     }
 }
