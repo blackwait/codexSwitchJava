@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -44,9 +45,29 @@ class CodexServiceTest {
         assertEquals("sk-proxy-a", service.launches.get(1).environment().get("OPENAI_API_KEY"));
     }
 
+    @Test
+    void restartCodexAppStopsExistingCodexBeforeLaunch() throws IOException {
+        TestableCodexService service = new TestableCodexService("C:\\tools\\codex.cmd");
+
+        service.restartCodexApp();
+
+        assertEquals(List.of("stop", "launch"), service.restartActions);
+    }
+
+    @Test
+    void codexProcessMatcherIncludesCodexAppAndCliButExcludesSwitcher() {
+        TestableCodexService service = new TestableCodexService("C:\\tools\\codex.cmd");
+
+        assertTrue(service.isCodexProcessCommand("C:\\Program Files\\WindowsApps\\OpenAI.Codex_26\\app\\Codex.exe"));
+        assertTrue(service.isCodexProcessCommand("C:\\Program Files\\WindowsApps\\OpenAI.Codex_26\\app\\resources\\codex.exe"));
+        assertFalse(service.isCodexProcessCommand("C:\\Program Files\\CodexSwitcher\\CodexSwitcher.exe"));
+        assertFalse(service.isCodexProcessCommand("C:\\Program Files\\nodejs\\node.exe"));
+    }
+
     private static final class TestableCodexService extends CodexService {
         private final String executable;
         private final List<AccountTestLaunch> launches = new ArrayList<>();
+        private final List<String> restartActions = new ArrayList<>();
 
         private TestableCodexService(String executable) {
             this.executable = executable;
@@ -60,6 +81,16 @@ class CodexServiceTest {
         @Override
         void launchAccountTest(AccountTestLaunch launch) {
             launches.add(launch);
+        }
+
+        @Override
+        void stopRunningCodexProcesses() {
+            restartActions.add("stop");
+        }
+
+        @Override
+        void launchCodexApp() {
+            restartActions.add("launch");
         }
     }
 }

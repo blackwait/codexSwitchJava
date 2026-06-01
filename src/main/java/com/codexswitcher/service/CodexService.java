@@ -120,6 +120,11 @@ public class CodexService extends BaseSupport {
         }
     }
 
+    public void restartCodexApp() throws IOException {
+        stopRunningCodexProcesses();
+        launchCodexApp();
+    }
+
     public String buildDebugReport() {
         StringBuilder builder = new StringBuilder();
         builder.append("Time: ").append(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now())).append(System.lineSeparator());
@@ -255,6 +260,52 @@ public class CodexService extends BaseSupport {
 
     void launchAccountTest(AccountTestLaunch launch) throws IOException {
         startInteractiveShell(launch.command(), null, launch.environment());
+    }
+
+    void stopRunningCodexProcesses() {
+        long currentPid = ProcessHandle.current().pid();
+        List<ProcessHandle> targets = ProcessHandle.allProcesses()
+            .filter(process -> process.pid() != currentPid)
+            .filter(process -> isCodexProcessCommand(process.info().command().orElse("")))
+            .toList();
+        for (ProcessHandle process : targets) {
+            try {
+                process.destroy();
+                ProcessHandle exited = process.onExit().completeOnTimeout(null, 2, TimeUnit.SECONDS).join();
+                if (exited != null) {
+                    continue;
+                }
+                if (process.isAlive()) {
+                    process.destroyForcibly();
+                    process.onExit().completeOnTimeout(null, 2, TimeUnit.SECONDS).join();
+                }
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    void launchCodexApp() throws IOException {
+        String executable = findCodexExecutable();
+        if (isBlank(executable)) {
+            throw new IOException("未检测到 codex 命令");
+        }
+        if (isWindows() && executable.toLowerCase(Locale.ROOT).endsWith(".ps1")) {
+            startDetached(List.of("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", executable, "app"), null, buildCommandEnvironment());
+            return;
+        }
+        startDetached(List.of(executable, "app"), null, buildCommandEnvironment());
+    }
+
+    boolean isCodexProcessCommand(String command) {
+        if (isBlank(command)) {
+            return false;
+        }
+        String normalized = command.replace('\\', '/').toLowerCase(Locale.ROOT);
+        if (normalized.contains("codexswitcher")) {
+            return false;
+        }
+        String fileName = Path.of(command).getFileName().toString().toLowerCase(Locale.ROOT);
+        return "codex.exe".equals(fileName) || "codex".equals(fileName);
     }
 
     private List<String> buildCodexChatCommand(String executable, String model) {

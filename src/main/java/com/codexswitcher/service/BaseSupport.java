@@ -34,7 +34,7 @@ import java.util.regex.Pattern;
 public abstract class BaseSupport {
 
     public static final String APP_TITLE = "Codex Switcher";
-    public static final String APP_VERSION = "2.0.9";
+    public static final String APP_VERSION = "1.0.1";
     public static final String APP_REPO = "nkosi-fang/CodexSwitcher";
     public static final Path CODEX_DIR = Path.of(System.getProperty("user.home"), ".codex");
     public static final Path PROFILE_STORE = CODEX_DIR.resolve("codex_profiles.json");
@@ -48,6 +48,37 @@ public abstract class BaseSupport {
     public static final ObjectMapper JSON = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
     public static final Pattern SEMVER = Pattern.compile("(\\d+\\.\\d+\\.\\d+)");
     public static final Pattern PING_REGEX = Pattern.compile("(?:time|时间)[=<]?\\s*(\\d+)\\s*ms", Pattern.CASE_INSENSITIVE);
+    private static final String DEFAULT_CONFIG_TOML = """
+        model_provider = "xcode"
+        model = "gpt-5.3-codex"
+        model_reasoning_effort = "high"
+        sandbox_mode = "danger-full-access"
+        approval_policy = "never"
+        personality = "pragmatic"
+        web_search = "live"
+
+        [model_providers.xcode]
+        name = "xcode"
+        base_url = "http://192.229.101.57:3000/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+
+        [features]
+        multi_agent = true
+        memories = true
+        responses_websockets_v2 = true
+
+        [sandbox_workspace_write]
+        network_access = true
+
+        [agents]
+        max_threads = 5
+        max_depth = 1
+
+        [memories]
+        extract_model = "gpt-5.4"
+        consolidation_model = "gpt-5.4"
+        """;
 
     public static String trimToEmpty(String text) {
         return text == null ? "" : text.trim();
@@ -64,6 +95,10 @@ public abstract class BaseSupport {
             }
         }
         return "";
+    }
+
+    public static String defaultConfigToml() {
+        return DEFAULT_CONFIG_TOML.stripTrailing() + System.lineSeparator();
     }
 
     public static String extractSemver(String text) {

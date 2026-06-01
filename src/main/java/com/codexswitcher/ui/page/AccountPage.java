@@ -199,7 +199,7 @@ public class AccountPage extends PagePane {
             context.services().store().applyAccountConfig(account);
             context.state().setActiveAccount(account);
             refreshStateOnly();
-            statusLabel.setText("账号已应用");
+            restartCodexAppAfterAccountApplied("账号已应用，正在重启 Codex...");
             context.refreshAll();
         } catch (Exception e) {
             Ui.error("失败", e.getMessage());
@@ -221,11 +221,26 @@ public class AccountPage extends PagePane {
             context.services().store().applyAccountConfig(account);
             context.state().setActiveAccount(account);
             loadAccounts();
-            statusLabel.setText("账号已保存并应用");
+            restartCodexAppAfterAccountApplied("账号已保存并应用，正在重启 Codex...");
             context.refreshAll();
         } catch (Exception e) {
             Ui.error("失败", e.getMessage());
         }
+    }
+
+    private void restartCodexAppAfterAccountApplied(String pendingText) {
+        statusLabel.setText(pendingText);
+        context.runAsync(
+            () -> {
+                context.services().codex().restartCodexApp();
+                return null;
+            },
+            ignored -> statusLabel.setText("账号已应用，Codex 已重启"),
+            error -> {
+                statusLabel.setText("账号已应用，但 Codex 重启失败：" + error.getMessage());
+                Ui.error("Codex 重启失败", error.getMessage());
+            }
+        );
     }
 
     private void deleteSelected() {
