@@ -304,7 +304,7 @@ public class CodexService extends BaseSupport {
         if (normalized.contains("codexswitcher")) {
             return false;
         }
-        String fileName = Path.of(command).getFileName().toString().toLowerCase(Locale.ROOT);
+        String fileName = normalized.substring(normalized.lastIndexOf('/') + 1);
         return "codex.exe".equals(fileName) || "codex".equals(fileName);
     }
 
