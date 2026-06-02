@@ -10,8 +10,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    name: Build on ${{ matrix.os }}
+  verify:
+    name: Verify on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -33,14 +33,71 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Build with Maven
+      - name: Verify with Maven
         run: mvn -B clean package
 
-      - name: Upload Maven artifacts
+  package-windows:
+    name: Package Windows installer
+    runs-on: windows-latest
+    needs: verify
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Install WiX Toolset
+        shell: powershell
+        run: |
+          choco install wixtoolset -y --no-progress
+          $candle = Get-Command candle.exe -ErrorAction SilentlyContinue
+          if ($candle) {
+            "WIX_HOME=$(Split-Path $candle.Source)" >> $env:GITHUB_ENV
+          }
+
+      - name: Build Windows installer
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File deploy\build_win.ps1
+
+      - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: codex-switcher-javafx-${{ matrix.os }}
+          name: codex-switcher-windows
           path: |
-            target/*.jar
-            target/jpackage-input/*.jar
+            dist/win/**
+          if-no-files-found: error
+
+  package-macos:
+    name: Package macOS installer
+    runs-on: macos-latest
+    needs: verify
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build macOS installer
+        run: |
+          chmod +x deploy/build_mac.sh
+          ./deploy/build_mac.sh
+
+      - name: Upload macOS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-switcher-macos
+          path: |
+            dist/mac/**
           if-no-files-found: error

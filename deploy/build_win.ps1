@@ -38,18 +38,11 @@ function Resolve-JavaHome {
 }
 
 function Resolve-MavenCommand {
-    $candidates = @()
     if ($env:MAVEN_HOME) {
-        $candidates += (Join-Path ${env:MAVEN_HOME} 'bin\mvn.cmd')
-    }
-    $candidates += @(
-        'G:\apache-maven-3.9.9\bin\mvn.cmd',
-        'F:\apache-maven-3.9.9\bin\mvn.cmd'
-    )
-    $candidates = $candidates | Where-Object { $_ -and (Test-Path $_) }
-
-    if ($candidates.Count -gt 0) {
-        return $candidates[0]
+        $mavenHomeCommand = Join-Path ${env:MAVEN_HOME} 'bin\mvn.cmd'
+        if (Test-Path $mavenHomeCommand) {
+            return $mavenHomeCommand
+        }
     }
 
     $cmd = Get-Command mvn.cmd -ErrorAction SilentlyContinue
@@ -60,6 +53,17 @@ function Resolve-MavenCommand {
     $cmd = Get-Command mvn -ErrorAction SilentlyContinue
     if ($cmd) {
         return $cmd.Source
+    }
+
+    $candidates = @()
+    $candidates += @(
+        'G:\apache-maven-3.9.9\bin\mvn.cmd',
+        'F:\apache-maven-3.9.9\bin\mvn.cmd'
+    )
+    $candidates = $candidates | Where-Object { $_ -and (Test-Path $_) }
+
+    if ($candidates.Count -gt 0) {
+        return $candidates[0]
     }
 
     throw 'Maven command was not found.'
