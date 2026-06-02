@@ -4,10 +4,15 @@ on:
   push:
     branches:
       - master
+    tags:
+      - "v*"
   pull_request:
     branches:
       - master
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   verify:
@@ -24,80 +29,186 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: "21"
           cache: maven
+
+      - name: Validate release tag version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          POM_VERSION="$(mvn -q help:evaluate -Dexpression=project.version -DforceStdout)"
+          POM_VERSION="${POM_VERSION%-SNAPSHOT}"
+          if [ "$TAG_VERSION" != "$POM_VERSION" ]; then
+            echo "Release tag version ($TAG_VERSION) must match pom.xml version ($POM_VERSION)."
+            exit 1
+          fi
 
       - name: Verify with Maven
         run: mvn -B clean package
 
-  package-windows:
-    name: Package Windows installer
-    runs-on: windows-latest
+  package:
+    name: Package ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
     needs: verify
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            javafx-platform: win
+            package-type: exe
+            artifact-ext: exe
+            icon: src/main/resources/assets/icon_app.ico
+          - name: linux-x64
+            os: ubuntu-latest
+            javafx-platform: linux
+            package-type: app-image
+            artifact-ext: tar.gz
+            icon: src/main/resources/assets/icon_app.png
+          - name: macos-x64
+            os: macos-15-intel
+            javafx-platform: mac
+            package-type: dmg
+            artifact-ext: dmg
+            icon: src/main/resources/assets/icon_app.icns
+          - name: macos-arm64
+            os: macos-14
+            javafx-platform: mac-aarch64
+            package-type: dmg
+            artifact-ext: dmg
+            icon: src/main/resources/assets/icon_app.icns
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: "21"
           cache: maven
+
+      - name: Build runtime input
+        shell: bash
+        run: |
+          set -euo pipefail
+          mvn -B clean package -DskipTests -Djavafx.platform="${{ matrix.javafx-platform }}"
+
+          APP_VERSION="$(mvn -q help:evaluate -Dexpression=project.version -DforceStdout)"
+          APP_VERSION="${APP_VERSION%-SNAPSHOT}"
+          APP_VERSION_PKG="$(echo "$APP_VERSION" | cut -d. -f1-3)"
+          MAIN_JAR_PATH="$(find target/jpackage-input -maxdepth 1 -type f -name 'codex-switcher-javafx-*.jar' | head -n 1)"
+
+          if [ -z "$MAIN_JAR_PATH" ]; then
+            echo "No jpackage input jar found under target/jpackage-input/"
+            find target -maxdepth 2 -print
+            exit 1
+          fi
+
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
+          echo "APP_VERSION_PKG=$APP_VERSION_PKG" >> "$GITHUB_ENV"
+          echo "MAIN_JAR=$(basename "$MAIN_JAR_PATH")" >> "$GITHUB_ENV"
 
       - name: Install WiX Toolset
-        shell: powershell
+        if: matrix.package-type == 'exe'
+        shell: pwsh
         run: |
           choco install wixtoolset -y --no-progress
-          $candle = Get-Command candle.exe -ErrorAction SilentlyContinue
-          if ($candle) {
-            "WIX_HOME=$(Split-Path $candle.Source)" >> $env:GITHUB_ENV
+          $wixBin = Get-ChildItem "C:\Program Files (x86)" -Directory -Filter "WiX Toolset*" |
+            Sort-Object Name -Descending |
+            Select-Object -First 1 |
+            ForEach-Object { Join-Path $_.FullName "bin" }
+          if (-not $wixBin -or -not (Test-Path $wixBin)) {
+            throw "WiX Toolset bin directory not found"
           }
+          $wixBin | Out-File -FilePath $env:GITHUB_PATH -Append
 
-      - name: Build Windows installer
-        shell: powershell
-        run: powershell -ExecutionPolicy Bypass -File deploy\build_win.ps1
-
-      - name: Upload Windows installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: codex-switcher-windows
-          path: |
-            dist/win/**
-          if-no-files-found: error
-
-  package-macos:
-    name: Package macOS installer
-    runs-on: macos-latest
-    needs: verify
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-
-      - name: Build macOS installer
+      - name: Build app package
+        shell: bash
         run: |
-          chmod +x deploy/build_mac.sh
-          ./deploy/build_mac.sh
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist
 
-      - name: Upload macOS installer
+          ICON_ARGS=()
+          if [ -n "${{ matrix.icon }}" ] && [ -f "${{ matrix.icon }}" ]; then
+            ICON_ARGS+=(--icon "${{ matrix.icon }}")
+          fi
+
+          WINDOWS_ARGS=()
+          if [ "${{ matrix.package-type }}" = "exe" ]; then
+            WINDOWS_ARGS+=(
+              --win-dir-chooser
+              --win-shortcut
+              --win-menu
+              --win-menu-group "CodexSwitcher"
+            )
+          fi
+
+          jpackage \
+            --type "${{ matrix.package-type }}" \
+            --name "CodexSwitcher" \
+            --app-version "$APP_VERSION_PKG" \
+            --input target/jpackage-input \
+            --main-jar "$MAIN_JAR" \
+            --main-class "com.codexswitcher.app.Launcher" \
+            --dest dist \
+            "${ICON_ARGS[@]}" \
+            "${WINDOWS_ARGS[@]}" \
+            --java-options "-Dfile.encoding=UTF-8" \
+            --java-options "--enable-native-access=ALL-UNNAMED" \
+            --vendor "CodexSwitcher"
+
+      - name: Prepare installer artifact
+        if: matrix.package-type != 'app-image'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARTIFACT="CodexSwitcher-${{ matrix.name }}-${APP_VERSION}.${{ matrix.artifact-ext }}"
+          PACKAGE_PATH="$(find dist -maxdepth 1 -type f -name "*.${{ matrix.artifact-ext }}" | head -n 1)"
+          if [ -z "$PACKAGE_PATH" ]; then
+            echo "No installer package found under dist/"
+            find dist -maxdepth 2 -print
+            exit 1
+          fi
+          cp "$PACKAGE_PATH" "$ARTIFACT"
+          echo "ARCHIVE_PATH=$ARTIFACT" >> "$GITHUB_ENV"
+
+      - name: Archive Linux app image
+        if: matrix.package-type == 'app-image'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE="CodexSwitcher-${{ matrix.name }}-${APP_VERSION}.tar.gz"
+          if [ ! -d "dist/CodexSwitcher" ]; then
+            echo "No Linux app image found under dist/"
+            find dist -maxdepth 2 -print
+            exit 1
+          fi
+          tar -C dist -czf "$ARCHIVE" "CodexSwitcher"
+          echo "ARCHIVE_PATH=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: codex-switcher-macos
-          path: |
-            dist/mac/**
+          name: CodexSwitcher-${{ matrix.name }}-${{ env.APP_VERSION }}
+          path: ${{ env.ARCHIVE_PATH }}
           if-no-files-found: error
+
+      - name: Publish GitHub Release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ARCHIVE_PATH }}
+          fail_on_unmatched_files: true
