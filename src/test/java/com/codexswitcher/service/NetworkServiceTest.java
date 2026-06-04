@@ -59,6 +59,15 @@ class NetworkServiceTest {
 
         @Override
         DiagnosisResult probeAccountEndpoints(Account account, String model, int timeoutSeconds) throws IOException, InterruptedException {
+            return resolveProbeOutcome(account);
+        }
+
+        @Override
+        DiagnosisResult probeAccountEndpointsForBatch(Account account, String model, int timeoutSeconds) throws IOException, InterruptedException {
+            return resolveProbeOutcome(account);
+        }
+
+        private DiagnosisResult resolveProbeOutcome(Account account) throws IOException, InterruptedException {
             String key = account.getName() + ":" + account.isTeam();
             if (failures.containsKey(key)) {
                 Exception failure = failures.get(key);

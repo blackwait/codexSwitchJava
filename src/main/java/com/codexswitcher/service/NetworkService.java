@@ -22,17 +22,60 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 
 public class NetworkService extends BaseSupport {
 
     public List<AccountProbeStatus> probeAccounts(List<Account> accounts, String model, int timeoutSeconds) {
-        List<AccountProbeStatus> results = new ArrayList<>();
-        for (Account account : accounts) {
-            results.add(probeAccount(account, model, timeoutSeconds));
+        if (accounts == null || accounts.isEmpty()) {
+            return List.of();
         }
-        return results;
+        if (accounts.size() == 1) {
+            return List.of(probeAccountForBatch(accounts.get(0), model, timeoutSeconds));
+        }
+        AccountProbeStatus[] ordered = new AccountProbeStatus[accounts.size()];
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<Future<?>> futures = new ArrayList<>(accounts.size());
+            for (int index = 0; index < accounts.size(); index++) {
+                int slot = index;
+                futures.add(executor.submit(() -> ordered[slot] = probeAccountForBatch(accounts.get(slot), model, timeoutSeconds)));
+            }
+            for (Future<?> future : futures) {
+                future.get();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("批量检测被中断", e);
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            throw new IllegalStateException("批量检测失败：" + cause.getMessage(), cause);
+        }
+        return List.of(ordered);
+    }
+
+    AccountProbeStatus probeAccountForBatch(Account account, String model, int timeoutSeconds) {
+        if (account == null) {
+            return new AccountProbeStatus("", false, false, "失败", "账号不存在");
+        }
+        if (isBlank(account.getBaseUrl()) || isBlank(account.getApiKey())) {
+            return new AccountProbeStatus(account.getName(), account.isTeam(), false, "失败", "Base URL 或 API Key 为空");
+        }
+        if (account.isTeam() && isBlank(account.getOrgId())) {
+            return new AccountProbeStatus(account.getName(), true, false, "失败", "Team 账号缺少 Org ID");
+        }
+        try {
+            DiagnosisResult diagnosis = probeAccountEndpointsForBatch(account, model, timeoutSeconds);
+            boolean ok = !isBlank(diagnosis.getSuccessEndpoint()) || Boolean.TRUE.equals(diagnosis.getModelSupported());
+            String detail = firstNonBlank(diagnosis.getDetail(), diagnosis.getSummaryDetail(), diagnosis.getConclusion(), "-");
+            return new AccountProbeStatus(account.getName(), account.isTeam(), ok, ok ? "可用" : "失败", detail);
+        } catch (Exception e) {
+            return new AccountProbeStatus(account.getName(), account.isTeam(), false, "失败", firstNonBlank(e.getMessage(), "检测异常"));
+        }
     }
 
     public AccountProbeStatus probeAccount(Account account, String model, int timeoutSeconds) {
@@ -66,13 +109,7 @@ public class NetworkService extends BaseSupport {
         Double http = httpHeadAverage(cleanedBase + "/models", apiKey, 1);
         boolean portOk = checkPort(cleanedBase);
 
-        Map<String, String> headers = new LinkedHashMap<>();
-        headers.put("Authorization", "Bearer " + apiKey);
-        headers.put("Content-Type", "application/json");
-        headers.put("User-Agent", "CodexSwitcher");
-        if (!isBlank(orgId)) {
-            headers.put("OpenAI-Organization", orgId);
-        }
+        Map<String, String> headers = buildAuthHeaders(apiKey, orgId);
 
         DiagnosisResult result = new DiagnosisResult();
         result.setBaseHost(host);
@@ -185,11 +222,120 @@ public class NetworkService extends BaseSupport {
         return probeEndpoints(account.getBaseUrl(), account.getApiKey(), account.getOrgId(), model, timeoutSeconds);
     }
 
-    public ProbeResult probeSingleModel(String base, String apiKey, String model, int timeoutSeconds) throws IOException, InterruptedException {
+    DiagnosisResult probeAccountEndpointsForBatch(Account account, String model, int timeoutSeconds) throws IOException, InterruptedException {
+        return probeEndpointsForBatch(account.getBaseUrl(), account.getApiKey(), account.getOrgId(), model, timeoutSeconds);
+    }
+
+    private DiagnosisResult probeEndpointsForBatch(String base, String apiKey, String orgId, String model, int timeoutSeconds) throws IOException, InterruptedException {
+        String cleanedBase = trimToEmpty(base).replaceAll("/+$", "");
+        String host = extractHost(cleanedBase);
+        if (isBlank(host)) {
+            throw new IOException("Base URL 无效，无法解析主机。");
+        }
+
+        Map<String, String> headers = buildAuthHeaders(apiKey, orgId);
+        List<EndpointCandidate> candidates = buildBatchCandidates(cleanedBase);
+        List<ProbeResult> probes = new ArrayList<>(candidates.size());
+
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<Future<ProbeResult>> futures = new ArrayList<>(candidates.size());
+            for (EndpointCandidate candidate : candidates) {
+                futures.add(executor.submit(() -> {
+                    try {
+                        return requestEndpoint(candidate, headers, model, timeoutSeconds);
+                    } catch (IOException | InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                }));
+            }
+            for (Future<ProbeResult> future : futures) {
+                try {
+                    probes.add(future.get());
+                } catch (ExecutionException e) {
+                    Throwable cause = e.getCause() == null ? e : e.getCause();
+                    if (cause instanceof InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw interrupted;
+                    }
+                    if (cause instanceof IOException ioException) {
+                        throw ioException;
+                    }
+                    if (cause instanceof RuntimeException runtimeException) {
+                        throw runtimeException;
+                    }
+                    throw new IOException(cause.getMessage(), cause);
+                }
+            }
+        }
+
+        DiagnosisResult result = new DiagnosisResult();
+        result.setBaseHost(host);
+        Boolean modelSupported = null;
+        String modelSource = "";
+        for (int index = 0; index < candidates.size(); index++) {
+            EndpointCandidate candidate = candidates.get(index);
+            ProbeResult probe = probes.get(index);
+            result.getResults().add(probe);
+            if (!Boolean.TRUE.equals(probe.getOk())) {
+                if (List.of("/responses", "/chat/completions").contains(candidate.endpoint) && isModelError(probe.getBody())) {
+                    modelSupported = false;
+                    modelSource = candidate.endpoint;
+                }
+                continue;
+            }
+            result.getSupportedLabels().add(candidate.label);
+            result.getSupportedUrls().add(candidate.url);
+            if (!"/models".equals(candidate.endpoint)) {
+                result.setSuccessEndpoint(candidate.endpoint);
+                modelSupported = true;
+                modelSource = candidate.endpoint;
+                break;
+            }
+            Set<String> models = parseModels(probe.getBody());
+            if (!models.isEmpty() && models.contains(model)) {
+                result.setModelInList(true);
+            }
+        }
+
+        result.setModelSupported(modelSupported);
+        result.setModelSource(modelSource);
+        String conclusion;
+        if (!isBlank(result.getSuccessEndpoint())) {
+            conclusion = "结论：链路正常（接口 " + result.getSuccessEndpoint() + "）。";
+        } else if (Boolean.FALSE.equals(modelSupported)) {
+            conclusion = "结论：模型不可用或账号异常。";
+        } else if (result.getSupportedLabels().stream().anyMatch(label -> label.contains("/models"))) {
+            conclusion = "结论：仅 /models 可用，API 接口可能受限。";
+        } else {
+            conclusion = "结论：接口不可用。";
+        }
+        result.setConclusion(conclusion);
+        result.setSummaryDetail("Base URL: " + cleanedBase + System.lineSeparator() + conclusion);
+        result.setDetail(result.getSummaryDetail());
+        return result;
+    }
+
+    private Map<String, String> buildAuthHeaders(String apiKey, String orgId) {
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put("Authorization", "Bearer " + apiKey);
         headers.put("Content-Type", "application/json");
         headers.put("User-Agent", "CodexSwitcher");
+        if (!isBlank(orgId)) {
+            headers.put("OpenAI-Organization", orgId);
+        }
+        return headers;
+    }
+
+    private List<EndpointCandidate> buildBatchCandidates(String base) {
+        return List.of(
+            new EndpointCandidate("Chat Completions /chat/completions", "/chat/completions", base + "/chat/completions"),
+            new EndpointCandidate("Responses /responses", "/responses", base + "/responses"),
+            new EndpointCandidate("Models /models", "/models", base + "/models")
+        );
+    }
+
+    public ProbeResult probeSingleModel(String base, String apiKey, String model, int timeoutSeconds) throws IOException, InterruptedException {
+        Map<String, String> headers = buildAuthHeaders(apiKey, null);
         return requestEndpoint(new EndpointCandidate("模型探测 /chat/completions", "/chat/completions", trimToEmpty(base).replaceAll("/+$", "") + "/chat/completions"),
             headers, model, timeoutSeconds);
     }
