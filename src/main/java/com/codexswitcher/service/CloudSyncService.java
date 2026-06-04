@@ -6,8 +6,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
 public class CloudSyncService extends BaseSupport {
@@ -20,29 +22,25 @@ public class CloudSyncService extends BaseSupport {
 
     public CloudSyncResult syncIfEnabled() throws IOException, InterruptedException {
         CloudSyncSettings settings = storeService.loadCloudSyncSettings();
-        if (!settings.isUnlocked()) {
-            return new CloudSyncResult(false, "云端同步未解锁", 0, false, "");
-        }
         if (!settings.isEnabled()) {
             return new CloudSyncResult(false, "云端同步未启用", 0, false, "");
         }
-        if (isBlank(settings.getServerUrl())) {
-            return new CloudSyncResult(false, "未配置服务端地址", 0, false, "");
-        }
-        return syncFromServer(settings.getServerUrl());
+        return syncFromServer(settings.getServerUrl(), settings.getProjectName());
     }
 
-    public CloudSyncResult syncNow(String serverUrl) throws IOException, InterruptedException {
+    public CloudSyncResult syncNow(String serverUrl, String projectName) throws IOException, InterruptedException {
         if (isBlank(serverUrl)) {
             throw new IOException("服务端地址不能为空");
         }
-        return syncFromServer(serverUrl);
+        String resolvedProject = isBlank(projectName) ? CloudSyncSettings.DEFAULT_PROJECT_NAME : projectName.trim();
+        return syncFromServer(serverUrl, resolvedProject);
     }
 
-    private CloudSyncResult syncFromServer(String serverUrl) throws IOException, InterruptedException {
+    private CloudSyncResult syncFromServer(String serverUrl, String projectName) throws IOException, InterruptedException {
         String normalizedServerUrl = normalizeServerUrl(serverUrl);
+        String encodedProject = URLEncoder.encode(projectName, StandardCharsets.UTF_8);
         HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create(normalizedServerUrl + "/api/client/sync"))
+            .uri(URI.create(normalizedServerUrl + "/api/sync/" + encodedProject))
             .timeout(Duration.ofSeconds(15))
             .header("Accept", "application/json")
             .GET()

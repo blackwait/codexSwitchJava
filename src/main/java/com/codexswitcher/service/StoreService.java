@@ -170,6 +170,10 @@ public class StoreService extends BaseSupport {
     }
 
     public CloudSyncApplyResult applyCloudAccounts(JsonNode rootNode) throws IOException {
+        ParsedBatch parsedBatch = parseBatch(rootNode);
+        if (parsedBatch.accounts.isEmpty() && !buildAccounts().isEmpty()) {
+            throw new IOException("云端配置为空，已保留本地账号");
+        }
         BatchImportResult importResult = importAccounts(rootNode);
         Account activeAccount = getActiveAccount();
         boolean activeApplied = false;
@@ -209,21 +213,27 @@ public class StoreService extends BaseSupport {
     public CloudSyncSettings loadCloudSyncSettings() {
         JsonNode node = loadStoreNode().path("cloud_sync");
         CloudSyncSettings settings = new CloudSyncSettings();
-        settings.setUnlocked(node.path("unlocked").asBoolean(false));
         settings.setEnabled(node.path("enabled").asBoolean(false));
-        settings.setServerUrl(trimToEmpty(node.path("server_url").asText("")));
+        String serverUrl = trimToEmpty(node.path("server_url").asText(""));
+        settings.setServerUrl(isBlank(serverUrl) ? CloudSyncSettings.DEFAULT_SERVER_URL : serverUrl);
+        String projectName = trimToEmpty(node.path("project_name").asText(""));
+        settings.setProjectName(isBlank(projectName) ? CloudSyncSettings.DEFAULT_PROJECT_NAME : projectName);
         return settings;
     }
 
     public void saveCloudSyncSettings(CloudSyncSettings settings) throws IOException {
         ObjectNode root = loadStoreNode();
         ObjectNode node = root.with("cloud_sync");
-        node.put("unlocked", settings != null && settings.isUnlocked());
         node.put("enabled", settings != null && settings.isEnabled());
         if (settings == null || isBlank(settings.getServerUrl())) {
-            node.putNull("server_url");
+            node.put("server_url", CloudSyncSettings.DEFAULT_SERVER_URL);
         } else {
             node.put("server_url", trimToEmpty(settings.getServerUrl()));
+        }
+        if (settings == null || isBlank(settings.getProjectName())) {
+            node.put("project_name", CloudSyncSettings.DEFAULT_PROJECT_NAME);
+        } else {
+            node.put("project_name", trimToEmpty(settings.getProjectName()));
         }
         saveStoreNode(root);
     }
