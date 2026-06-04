@@ -1,8 +1,10 @@
 package com.codexswitcher.service;
 
 import com.codexswitcher.model.Account;
+import com.codexswitcher.model.CloudAuthSession;
 import com.codexswitcher.model.CloudSyncSettings;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
@@ -210,6 +212,28 @@ public class StoreService extends BaseSupport {
         setActiveAccount(account);
     }
 
+    public ObjectNode buildAccountsSyncPayload() {
+        ObjectNode root = JSON.createObjectNode();
+        ArrayNode accounts = root.putArray("accounts");
+        for (Account account : buildAccounts()) {
+            ObjectNode item = accounts.addObject();
+            item.put("name", account.getName());
+            item.put("base_url", account.getBaseUrl());
+            item.put("api_key", account.getApiKey());
+            item.put("model_name", trimToEmpty(account.getModelName()));
+            item.put("org_id", trimToEmpty(account.getOrgId()));
+            item.put("team", account.isTeam());
+            item.put("account_type", trimToEmpty(account.getAccountType()));
+        }
+        Account active = getActiveAccount();
+        if (active != null) {
+            ObjectNode activeNode = root.putObject("active");
+            activeNode.put("name", active.getName());
+            activeNode.put("team", active.isTeam());
+        }
+        return root;
+    }
+
     public CloudSyncSettings loadCloudSyncSettings() {
         JsonNode node = loadStoreNode().path("cloud_sync");
         CloudSyncSettings settings = new CloudSyncSettings();
@@ -218,6 +242,7 @@ public class StoreService extends BaseSupport {
         settings.setServerUrl(isBlank(serverUrl) ? CloudSyncSettings.DEFAULT_SERVER_URL : serverUrl);
         String projectName = trimToEmpty(node.path("project_name").asText(""));
         settings.setProjectName(isBlank(projectName) ? CloudSyncSettings.DEFAULT_PROJECT_NAME : projectName);
+        settings.setAuthSession(loadCloudAuthSession(node.path("auth")));
         return settings;
     }
 
@@ -235,7 +260,42 @@ public class StoreService extends BaseSupport {
         } else {
             node.put("project_name", trimToEmpty(settings.getProjectName()));
         }
+        if (settings != null && settings.getAuthSession().isLoggedIn()) {
+            writeCloudAuthSession(node, settings.getAuthSession());
+        } else {
+            node.remove("auth");
+        }
         saveStoreNode(root);
+    }
+
+    public void clearCloudAuthSession() throws IOException {
+        ObjectNode root = loadStoreNode();
+        root.with("cloud_sync").remove("auth");
+        saveStoreNode(root);
+    }
+
+    private CloudAuthSession loadCloudAuthSession(JsonNode authNode) {
+        CloudAuthSession session = new CloudAuthSession();
+        if (authNode == null || !authNode.isObject()) {
+            return session;
+        }
+        if (authNode.has("user_id")) {
+            session.setUserId(authNode.path("user_id").asLong());
+        }
+        session.setUsername(trimToEmpty(authNode.path("username").asText("")));
+        session.setToken(trimToEmpty(authNode.path("token").asText("")));
+        return session;
+    }
+
+    private void writeCloudAuthSession(ObjectNode cloudSyncNode, CloudAuthSession session) {
+        ObjectNode auth = cloudSyncNode.with("auth");
+        if (session.getUserId() != null) {
+            auth.put("user_id", session.getUserId());
+        } else {
+            auth.putNull("user_id");
+        }
+        auth.put("username", trimToEmpty(session.getUsername()));
+        auth.put("token", trimToEmpty(session.getToken()));
     }
 
     public void saveVscodeInstallDir(Path path) throws IOException {

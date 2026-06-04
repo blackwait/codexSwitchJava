@@ -8,6 +8,22 @@ public class CloudSyncSettings {
     private boolean enabled;
     private String serverUrl;
     private String projectName;
+    private CloudAuthSession authSession = new CloudAuthSession();
+
+    public boolean isLoggedIn() {
+        return authSession != null && authSession.isLoggedIn();
+    }
+
+    public CloudAuthSession getAuthSession() {
+        if (authSession == null) {
+            authSession = new CloudAuthSession();
+        }
+        return authSession;
+    }
+
+    public void setAuthSession(CloudAuthSession authSession) {
+        this.authSession = authSession == null ? new CloudAuthSession() : authSession;
+    }
 
     public boolean isEnabled() {
         return enabled;

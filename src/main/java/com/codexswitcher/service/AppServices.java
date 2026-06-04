@@ -5,6 +5,7 @@ public class AppServices {
     private final StoreService storeService = new StoreService();
     private final CodexService codexService = new CodexService();
     private final NetworkService networkService = new NetworkService();
+    private final CloudAuthService cloudAuthService = new CloudAuthService();
     private final CloudSyncService cloudSyncService = new CloudSyncService(storeService);
     private final OpencodeService opencodeService = new OpencodeService();
     private final SkillsService skillsService = new SkillsService();
@@ -23,6 +24,10 @@ public class AppServices {
 
     public NetworkService network() {
         return networkService;
+    }
+
+    public CloudAuthService cloudAuth() {
+        return cloudAuthService;
     }
 
     public CloudSyncService cloudSync() {
