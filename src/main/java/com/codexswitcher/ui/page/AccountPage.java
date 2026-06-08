@@ -29,6 +29,7 @@ import java.util.Map;
 
 public class AccountPage extends PagePane {
 
+    private static final String CLOUD_SYNC_PAGE_KEY = "cloud_sync";
     private static final String DEFAULT_TEST_MODEL = "gpt-5.3-codex";
     private static final int PROBE_TIMEOUT_SECONDS = 30;
 
@@ -207,6 +208,7 @@ public class AccountPage extends PagePane {
             refreshStateOnly();
             restartCodexAppAfterAccountApplied("账号已应用，正在重启 Codex...");
             context.refreshAll();
+            context.navigateTo(CLOUD_SYNC_PAGE_KEY);
         } catch (Exception e) {
             Ui.error("失败", e.getMessage());
         }
@@ -229,6 +231,7 @@ public class AccountPage extends PagePane {
             loadAccounts();
             restartCodexAppAfterAccountApplied("账号已保存并应用，正在重启 Codex...");
             context.refreshAll();
+            context.navigateTo(CLOUD_SYNC_PAGE_KEY);
         } catch (Exception e) {
             Ui.error("失败", e.getMessage());
         }

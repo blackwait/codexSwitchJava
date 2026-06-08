@@ -14,13 +14,15 @@ public class AppContext {
     private final AppServices services;
     private final ExecutorService executor;
     private final Runnable refreshAll;
+    private final Consumer<String> navigateTo;
     private final Consumer<Integer> updateBadge;
 
-    public AppContext(AppState state, AppServices services, ExecutorService executor, Runnable refreshAll, Consumer<Integer> updateBadge) {
+    public AppContext(AppState state, AppServices services, ExecutorService executor, Runnable refreshAll, Consumer<String> navigateTo, Consumer<Integer> updateBadge) {
         this.state = state;
         this.services = services;
         this.executor = executor;
         this.refreshAll = refreshAll;
+        this.navigateTo = navigateTo;
         this.updateBadge = updateBadge;
     }
 
@@ -34,6 +36,10 @@ public class AppContext {
 
     public void refreshAll() {
         refreshAll.run();
+    }
+
+    public void navigateTo(String pageKey) {
+        navigateTo.accept(pageKey);
     }
 
     public void updateBadge(int count) {

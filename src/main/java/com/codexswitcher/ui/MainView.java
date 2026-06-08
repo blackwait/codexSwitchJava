@@ -42,7 +42,7 @@ public class MainView extends BorderPane {
 
     public MainView(AppState state, AppServices services) {
         getStyleClass().add("app-root");
-        context = new AppContext(state, services, executor, this::refreshAllPages, count -> {
+        context = new AppContext(state, services, executor, this::refreshAllPages, this::showPage, count -> {
         });
 
         VBox frame = new VBox(12);
