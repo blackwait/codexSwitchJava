@@ -49,35 +49,23 @@ public abstract class BaseSupport {
     public static final Pattern SEMVER = Pattern.compile("(\\d+\\.\\d+\\.\\d+)");
     public static final Pattern PING_REGEX = Pattern.compile("(?:time|时间)[=<]?\\s*(\\d+)\\s*ms", Pattern.CASE_INSENSITIVE);
     private static final String DEFAULT_CONFIG_TOML = """
-        model_provider = "xcode"
-        model = "gpt-5.3-codex"
-        model_reasoning_effort = "high"
-        sandbox_mode = "danger-full-access"
-        approval_policy = "never"
-        personality = "pragmatic"
-        web_search = "live"
+        model = "gpt-5.5"
+        model_provider = "codexzh"
 
-        [model_providers.xcode]
-        name = "xcode"
-        base_url = "http://192.229.101.57:3000/v1"
-        wire_api = "responses"
+        approval_policy = "on-request"
+        sandbox_mode = "workspace-write"
+
+        [tools]
+        web_search = true
+
+        [model_providers.codexzh]
+        name = "codexzh"
+        base_url = "https://api.ckff.tech/v1"
         requires_openai_auth = true
+        wire_api = "responses"
 
-        [features]
-        multi_agent = true
-        memories = true
-        responses_websockets_v2 = true
-
-        [sandbox_workspace_write]
-        network_access = true
-
-        [agents]
-        max_threads = 5
-        max_depth = 1
-
-        [memories]
-        extract_model = "gpt-5.4"
-        consolidation_model = "gpt-5.4"
+        [windows]
+        sandbox = "elevated"
         """;
 
     public static String trimToEmpty(String text) {

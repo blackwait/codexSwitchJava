@@ -212,6 +212,13 @@ public class StoreService extends BaseSupport {
         setActiveAccount(account);
     }
 
+    public void ensureDefaultConfigExists() throws IOException {
+        if (Files.exists(CONFIG_PATH) && !readText(CONFIG_PATH).trim().isEmpty()) {
+            return;
+        }
+        writeText(CONFIG_PATH, defaultConfigToml());
+    }
+
     public ObjectNode buildAccountsSyncPayload() {
         ObjectNode root = JSON.createObjectNode();
         ArrayNode accounts = root.putArray("accounts");

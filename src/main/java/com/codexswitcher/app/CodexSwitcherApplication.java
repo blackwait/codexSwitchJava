@@ -17,6 +17,11 @@ public class CodexSwitcherApplication extends Application {
     public void start(Stage stage) {
         AppState state = new AppState();
         AppServices services = new AppServices();
+        try {
+            services.store().ensureDefaultConfigExists();
+        } catch (Exception e) {
+            services.store().logLine("初始化默认 config.toml 失败", e.getMessage());
+        }
         state.setActiveAccount(services.store().getActiveAccount());
         state.setVscodeInstallDir(services.store().loadVscodeInstallDir());
         state.setCloudSyncSettings(services.store().loadCloudSyncSettings());
