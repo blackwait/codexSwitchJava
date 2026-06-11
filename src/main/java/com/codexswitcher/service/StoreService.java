@@ -113,6 +113,11 @@ public class StoreService extends BaseSupport {
 
     public void setActiveAccount(Account account) throws IOException {
         ObjectNode root = loadStoreNode();
+        setActiveAccount(root, account);
+        saveStoreNode(root);
+    }
+
+    private void setActiveAccount(ObjectNode root, Account account) {
         if (account == null || isBlank(account.getName())) {
             root.putNull("active");
         } else if (account.isTeam()) {
@@ -120,11 +125,24 @@ public class StoreService extends BaseSupport {
         } else {
             root.put("active", account.getName());
         }
-        saveStoreNode(root);
     }
 
     public void upsertAccount(Account account) throws IOException {
         ObjectNode root = loadStoreNode();
+        upsertAccount(root, account);
+        saveStoreNode(root);
+    }
+
+    public void saveAccount(Account previousAccount, Account account) throws IOException {
+        ObjectNode root = loadStoreNode();
+        String previousKey = accountStoreKey(previousAccount);
+        String nextKey = accountStoreKey(account);
+        if (!isBlank(previousKey) && !previousKey.equals(nextKey)) {
+            removeAccount(root, previousAccount);
+            if (previousKey.equals(root.path("active").asText(""))) {
+                setActiveAccount(root, account);
+            }
+        }
         upsertAccount(root, account);
         saveStoreNode(root);
     }
@@ -192,13 +210,9 @@ public class StoreService extends BaseSupport {
             return;
         }
         ObjectNode root = loadStoreNode();
-        if (account.isTeam()) {
-            root.with("teams").remove(account.getName());
-        } else {
-            root.with("profiles").remove(account.getName());
-        }
+        removeAccount(root, account);
         String active = root.path("active").asText("");
-        String key = account.isTeam() ? "team:" + account.getName() : account.getName();
+        String key = accountStoreKey(account);
         if (active.equals(key)) {
             root.putNull("active");
         }
@@ -499,6 +513,24 @@ public class StoreService extends BaseSupport {
             profile.put("account_type", firstNonBlank(account.getAccountType(), "proxy"));
             profiles.set(account.getName(), profile);
         }
+    }
+
+    private void removeAccount(ObjectNode root, Account account) {
+        if (account == null || isBlank(account.getName())) {
+            return;
+        }
+        if (account.isTeam()) {
+            root.with("teams").remove(account.getName());
+        } else {
+            root.with("profiles").remove(account.getName());
+        }
+    }
+
+    private String accountStoreKey(Account account) {
+        if (account == null || isBlank(account.getName())) {
+            return "";
+        }
+        return account.isTeam() ? "team:" + account.getName() : account.getName();
     }
 
     private ParsedBatch parseBatch(JsonNode root) throws IOException {

@@ -140,7 +140,7 @@ public class AccountPage extends PagePane {
         HBox.setHgrow(right, Priority.ALWAYS);
 
         root.getChildren().addAll(body, Ui.card("说明",
-            new Label("保存后会自动写入 ~/.codex 下的 config.toml、auth.json 与激活账号指针。"),
+            new Label("保存/更新只维护本地账号列表；应用账号才会写入 ~/.codex 下的 config.toml、auth.json 与激活账号指针。"),
             new Label("批量导入/导出使用 JSON 文件，导入时会全量替换本地账号列表。")));
     }
 
@@ -206,7 +206,7 @@ public class AccountPage extends PagePane {
             context.services().store().applyAccountConfig(account);
             context.state().setActiveAccount(account);
             refreshStateOnly();
-            restartCodexAppAfterAccountApplied("账号已应用，正在重启 Codex...");
+            statusLabel.setText("账号已应用");
             context.refreshAll();
             context.navigateTo(CLOUD_SYNC_PAGE_KEY);
         } catch (Exception e) {
@@ -225,31 +225,14 @@ public class AccountPage extends PagePane {
             return;
         }
         try {
-            context.services().store().upsertAccount(account);
-            context.services().store().applyAccountConfig(account);
-            context.state().setActiveAccount(account);
+            Account selectedAccount = listView.getSelectionModel().getSelectedItem();
+            context.services().store().saveAccount(selectedAccount, account);
             loadAccounts();
-            restartCodexAppAfterAccountApplied("账号已保存并应用，正在重启 Codex...");
             context.refreshAll();
-            context.navigateTo(CLOUD_SYNC_PAGE_KEY);
+            statusLabel.setText("账号已保存");
         } catch (Exception e) {
             Ui.error("失败", e.getMessage());
         }
-    }
-
-    private void restartCodexAppAfterAccountApplied(String pendingText) {
-        statusLabel.setText(pendingText);
-        context.runAsync(
-            () -> {
-                context.services().codex().restartCodexApp();
-                return null;
-            },
-            ignored -> statusLabel.setText("账号已应用，Codex 已重启"),
-            error -> {
-                statusLabel.setText("账号已应用，但 Codex 重启失败：" + error.getMessage());
-                Ui.error("Codex 重启失败", error.getMessage());
-            }
-        );
     }
 
     private void deleteSelected() {

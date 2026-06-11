@@ -1,141 +1,93 @@
 package com.codexswitcher.ui.page;
 
-import com.codexswitcher.model.CloudAuthSession;
 import com.codexswitcher.model.CloudSyncResult;
 import com.codexswitcher.model.CloudSyncSettings;
 import com.codexswitcher.ui.AppContext;
 import com.codexswitcher.ui.PagePane;
 import com.codexswitcher.ui.Ui;
+import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.Priority;
-import javafx.scene.layout.VBox;
 
 import java.net.URI;
 
 public class CloudSyncPage extends PagePane {
 
-    private final VBox loginPanel = new VBox(12);
-    private final VBox loggedInPanel = new VBox(12);
-
-    private final TextField serverHostField = new TextField();
-    private final TextField serverPortField = new TextField();
-    private final TextField loggedInServerField = new TextField();
+    private final TextField serverUrlField = new TextField();
     private final TextField usernameField = new TextField();
     private final PasswordField passwordField = new PasswordField();
-    private final Label loginStatusLabel = new Label();
-
-    private final Label userLabel = new Label();
-    private final TextField projectNameField = new TextField();
     private final Label syncStatusLabel = new Label();
+    private final Button loginButton = Ui.button("登录");
+    private final Button logoutButton = Ui.button("退出登录");
+    private final Button pullButton = Ui.button("从云端拉取");
+    private final Button pushButton = Ui.button("推送到云端");
     private String serverScheme = "http";
 
     public CloudSyncPage(AppContext context) {
         super(context);
-        ServerEndpoint defaultEndpoint = parseServerUrl(CloudSyncSettings.DEFAULT_SERVER_URL);
-        serverHostField.setPromptText(defaultEndpoint.host());
-        serverPortField.setPromptText(defaultEndpoint.port());
-        projectNameField.setPromptText(CloudSyncSettings.DEFAULT_PROJECT_NAME);
+        serverUrlField.setPromptText(CloudSyncSettings.DEFAULT_SERVER_URL);
         usernameField.setPromptText("云端账号");
         passwordField.setPromptText("密码");
-        serverHostField.textProperty().addListener((obs, oldValue, newValue) -> updateLoggedInServerField());
-        serverPortField.textProperty().addListener((obs, oldValue, newValue) -> updateLoggedInServerField());
 
-        GridPane loginForm = new GridPane();
-        loginForm.setHgap(10);
-        loginForm.setVgap(12);
-        loginForm.add(new Label("服务端地址"), 0, 0);
-        loginForm.add(serverHostField, 1, 0);
-        loginForm.add(new Label("端口"), 0, 1);
-        loginForm.add(serverPortField, 1, 1);
-        loginForm.add(new Label("登录账号"), 0, 2);
-        loginForm.add(usernameField, 1, 2);
-        loginForm.add(new Label("密码"), 0, 3);
-        loginForm.add(passwordField, 1, 3);
-        GridPane.setHgrow(serverHostField, Priority.ALWAYS);
-        GridPane.setHgrow(serverPortField, Priority.ALWAYS);
-        GridPane.setHgrow(usernameField, Priority.ALWAYS);
-        GridPane.setHgrow(passwordField, Priority.ALWAYS);
-
-        var loginButton = Ui.button("登录");
         loginButton.setOnAction(event -> login());
-        loginPanel.getChildren().addAll(
-            Ui.card("云端登录", loginForm, Ui.row(loginButton), loginStatusLabel)
-        );
-
-        var logoutButton = Ui.button("退出登录");
         logoutButton.setOnAction(event -> logout());
-        var saveButton = Ui.button("保存配置");
-        saveButton.setOnAction(event -> saveSettings());
-        var pullButton = Ui.button("从云端拉取");
         pullButton.setOnAction(event -> pullFromCloud());
-        var pushButton = Ui.button("推送到云端");
         pushButton.setOnAction(event -> pushToCloud());
-
-        loggedInServerField.setEditable(false);
 
         GridPane syncForm = new GridPane();
         syncForm.setHgap(10);
         syncForm.setVgap(12);
         syncForm.add(new Label("服务端地址"), 0, 0);
-        syncForm.add(loggedInServerField, 1, 0);
-        syncForm.add(new Label("项目名称"), 0, 1);
-        syncForm.add(projectNameField, 1, 1);
-        GridPane.setHgrow(loggedInServerField, Priority.ALWAYS);
-        GridPane.setHgrow(projectNameField, Priority.ALWAYS);
-
-        loggedInPanel.getChildren().addAll(
-            Ui.card("当前账号", Ui.row(userLabel, Ui.spacer(), logoutButton)),
-            Ui.card("同步操作", syncForm, Ui.row(saveButton, pullButton, pushButton), syncStatusLabel)
-        );
+        syncForm.add(serverUrlField, 1, 0);
+        syncForm.add(new Label("账号"), 0, 1);
+        syncForm.add(usernameField, 1, 1);
+        syncForm.add(new Label("密码"), 0, 2);
+        syncForm.add(passwordField, 1, 2);
+        GridPane.setHgrow(serverUrlField, Priority.ALWAYS);
+        GridPane.setHgrow(usernameField, Priority.ALWAYS);
+        GridPane.setHgrow(passwordField, Priority.ALWAYS);
 
         root.getChildren().addAll(
             Ui.title("云端同步"),
-            loginPanel,
-            loggedInPanel,
+            Ui.card("云端账号", syncForm, Ui.row(loginButton, logoutButton, pullButton, pushButton), syncStatusLabel),
             Ui.card("说明",
-                new Label("需先登录后才能拉取或推送账号配置。"),
+                new Label("服务端地址、账号、密码正确后即可登录，登录成功后可拉取或推送账号配置。"),
                 new Label("登录态保存在本地 ~/.codex/codex_profiles.json。"),
                 new Label("拉取会覆盖本地账号；推送会上传当前全部账号到云端。"))
         );
-        refreshPanels();
+        refreshActions();
     }
 
     @Override
     public void onShow() {
         loadSettings();
-        refreshPanels();
+        refreshActions();
     }
 
     @Override
     public void refreshStateOnly() {
-        refreshPanels();
+        refreshActions();
         syncStatusLabel.setText(context.state().getCloudSyncStatus());
     }
 
-    private void refreshPanels() {
+    private void refreshActions() {
         boolean loggedIn = context.state().getCloudSyncSettings().isLoggedIn();
-        loginPanel.setVisible(!loggedIn);
-        loginPanel.setManaged(!loggedIn);
-        loggedInPanel.setVisible(loggedIn);
-        loggedInPanel.setManaged(loggedIn);
-        if (loggedIn) {
-            CloudAuthSession session = context.state().getCloudSyncSettings().getAuthSession();
-            userLabel.setText("已登录：" + session.getUsername());
-        }
+        loginButton.setDisable(loggedIn);
+        logoutButton.setDisable(!loggedIn);
+        pullButton.setDisable(!loggedIn);
+        pushButton.setDisable(!loggedIn);
     }
 
     private void loadSettings() {
         CloudSyncSettings settings = context.state().getCloudSyncSettings();
         applyServerUrl(settings.getServerUrl());
-        projectNameField.setText(settings.getProjectName());
         if (!settings.getAuthSession().getUsername().isBlank()) {
             usernameField.setText(settings.getAuthSession().getUsername());
         }
         syncStatusLabel.setText(context.state().getCloudSyncStatus());
-        loginStatusLabel.setText("");
         passwordField.clear();
     }
 
@@ -150,28 +102,27 @@ public class CloudSyncPage extends PagePane {
             Ui.warn("提示", "请填写登录账号和密码");
             return;
         }
-        loginStatusLabel.setText("登录中...");
+        syncStatusLabel.setText("登录中...");
         context.runAsync(
             () -> context.services().cloudAuth().login(serverUrl, username, password),
             session -> {
                 try {
-                    CloudSyncSettings settings = buildSettings();
+                    CloudSyncSettings settings = buildSettings(serverUrl);
                     settings.setAuthSession(session);
                     context.services().store().saveCloudSyncSettings(settings);
                     context.state().setCloudSyncSettings(settings);
                     context.state().setCloudSyncStatus("已登录：" + session.getUsername());
                     passwordField.clear();
-                    loginStatusLabel.setText("");
                     syncStatusLabel.setText(context.state().getCloudSyncStatus());
-                    refreshPanels();
+                    refreshActions();
                     Ui.info("完成", "登录成功");
                 } catch (Exception e) {
-                    loginStatusLabel.setText("保存登录态失败：" + e.getMessage());
+                    syncStatusLabel.setText("保存登录态失败：" + e.getMessage());
                     Ui.error("失败", e.getMessage());
                 }
             },
             error -> {
-                loginStatusLabel.setText(error.getMessage());
+                syncStatusLabel.setText(error.getMessage());
                 Ui.error("登录失败", error.getMessage());
             }
         );
@@ -186,23 +137,7 @@ public class CloudSyncPage extends PagePane {
             context.state().setCloudSyncStatus("已退出登录");
             passwordField.clear();
             syncStatusLabel.setText(context.state().getCloudSyncStatus());
-            refreshPanels();
-        } catch (Exception e) {
-            Ui.error("失败", e.getMessage());
-        }
-    }
-
-    private void saveSettings() {
-        try {
-            String serverUrl = resolveServerUrlOrWarn();
-            if (serverUrl == null) {
-                return;
-            }
-            CloudSyncSettings settings = buildSettings(serverUrl);
-            context.services().store().saveCloudSyncSettings(settings);
-            context.state().setCloudSyncSettings(settings);
-            context.state().setCloudSyncStatus("云端配置已保存");
-            syncStatusLabel.setText(context.state().getCloudSyncStatus());
+            refreshActions();
         } catch (Exception e) {
             Ui.error("失败", e.getMessage());
         }
@@ -261,16 +196,11 @@ public class CloudSyncPage extends PagePane {
             try {
                 context.services().store().clearCloudAuthSession();
                 context.state().getCloudSyncSettings().getAuthSession().clear();
-                refreshPanels();
+                refreshActions();
             } catch (Exception ignored) {
             }
         }
         Ui.error("失败", text);
-    }
-
-    private CloudSyncSettings buildSettings() {
-        String serverUrl = buildServerUrl();
-        return buildSettings(serverUrl.isBlank() ? CloudSyncSettings.DEFAULT_SERVER_URL : serverUrl);
     }
 
     private CloudSyncSettings buildSettings(String serverUrl) {
@@ -279,36 +209,25 @@ public class CloudSyncPage extends PagePane {
         settings.setEnabled(false);
         settings.setAuthSession(current.getAuthSession());
         settings.setServerUrl(serverUrl.isBlank() ? CloudSyncSettings.DEFAULT_SERVER_URL : serverUrl);
-        String projectName = projectNameField.getText() == null ? "" : projectNameField.getText().trim();
-        settings.setProjectName(projectName.isBlank() ? CloudSyncSettings.DEFAULT_PROJECT_NAME : projectName);
+        settings.setProjectName(CloudSyncSettings.DEFAULT_PROJECT_NAME);
         return settings;
     }
 
     private void applyServerUrl(String serverUrl) {
         ServerEndpoint endpoint = parseServerUrl(serverUrl);
         serverScheme = endpoint.scheme();
-        serverHostField.setText(endpoint.host());
-        serverPortField.setText(endpoint.port());
-        updateLoggedInServerField();
-    }
-
-    private void updateLoggedInServerField() {
-        loggedInServerField.setText(buildServerUrl());
+        serverUrlField.setText(endpoint.scheme() + "://" + endpoint.host() + ":" + endpoint.port());
     }
 
     private String resolveServerUrlOrWarn() {
-        String host = serverHostField.getText() == null ? "" : serverHostField.getText().trim();
-        if (host.isBlank()) {
+        String value = serverUrlField.getText() == null ? "" : serverUrlField.getText().trim();
+        if (value.isBlank()) {
             Ui.warn("提示", "请填写服务端地址");
             return null;
         }
-        String port = resolvePort(host, serverPortField.getText());
-        if (port.isBlank()) {
-            Ui.warn("提示", "请填写端口");
-            return null;
-        }
+        ServerEndpoint endpoint = parseServerUrl(value);
         try {
-            int portValue = Integer.parseInt(port);
+            int portValue = Integer.parseInt(endpoint.port());
             if (portValue < 1 || portValue > 65535) {
                 Ui.warn("提示", "端口需在 1 到 65535 之间");
                 return null;
@@ -317,38 +236,9 @@ public class CloudSyncPage extends PagePane {
             Ui.warn("提示", "端口只能填写数字");
             return null;
         }
-        return buildServerUrl();
-    }
-
-    private String buildServerUrl() {
-        String hostText = serverHostField.getText() == null ? "" : serverHostField.getText().trim();
-        if (hostText.isBlank()) {
-            return "";
-        }
-        ServerEndpoint endpoint = parseServerUrl(composeRawServerUrl(hostText, serverPortField.getText()));
+        serverScheme = endpoint.scheme();
+        serverUrlField.setText(endpoint.scheme() + "://" + endpoint.host() + ":" + endpoint.port());
         return endpoint.scheme() + "://" + endpoint.host() + ":" + endpoint.port();
-    }
-
-    private String composeRawServerUrl(String hostText, String portText) {
-        String port = resolvePort(hostText, portText);
-        String host = trimScheme(hostText);
-        int colonIndex = host.lastIndexOf(':');
-        if (colonIndex > 0) {
-            host = host.substring(0, colonIndex);
-        }
-        return serverScheme + "://" + host + ":" + port;
-    }
-
-    private String resolvePort(String hostText, String portText) {
-        String port = portText == null ? "" : portText.trim();
-        if (!port.isBlank()) {
-            return port;
-        }
-        ServerEndpoint endpoint = parseServerUrl(hostText);
-        if (!endpoint.port().isBlank()) {
-            return endpoint.port();
-        }
-        return parseServerUrl(CloudSyncSettings.DEFAULT_SERVER_URL).port();
     }
 
     private ServerEndpoint parseServerUrl(String serverUrl) {

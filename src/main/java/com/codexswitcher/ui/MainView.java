@@ -6,7 +6,6 @@ import com.codexswitcher.ui.page.AccountPage;
 import com.codexswitcher.ui.page.CodexStatusPage;
 import com.codexswitcher.ui.page.CloudSyncPage;
 import com.codexswitcher.ui.page.ConfigPage;
-import com.codexswitcher.ui.page.NetworkPage;
 import com.codexswitcher.ui.page.OpenAiStatusPagePane;
 import com.codexswitcher.ui.page.OpencodePage;
 import com.codexswitcher.ui.page.SessionsPage;
@@ -69,7 +68,6 @@ public class MainView extends BorderPane {
         pages.put(CLOUD_SYNC_KEY, new CloudSyncPage(context));
         pages.put("sessions", new SessionsPage(context));
         pages.put("skills", new SkillsPagePane(context));
-        pages.put("network", new NetworkPage(context));
         pages.put("openai", new OpenAiStatusPagePane(context));
 
         addNav(nav, "Codex CLI状态", "codex_status");
@@ -80,7 +78,6 @@ public class MainView extends BorderPane {
         addNav(nav, "云端同步", CLOUD_SYNC_KEY);
         addNav(nav, "Codex会话管理", "sessions");
         addNav(nav, "Skill 管理", "skills");
-        addNav(nav, "中转站接口", "network");
         addNav(nav, "OpenAI官网状态", "openai");
 
         showPage("account");
