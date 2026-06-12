@@ -15,13 +15,19 @@ import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.TreeSet;
+import java.util.regex.Pattern;
 
 public class StoreService extends BaseSupport {
 
     private static final String DEFAULT_ACCOUNT_TEST_MODEL = "gpt-5.3-codex";
+    private static final String ACCOUNT_ORDER = "account_order";
+    private static final String RESTART_CODEX_AFTER_ACCOUNT_APPLY = "restart_codex_after_account_apply";
 
     public ObjectNode loadStoreNode() {
         ObjectNode root;
@@ -56,6 +62,10 @@ public class StoreService extends BaseSupport {
 
     public List<Account> buildAccounts() {
         ObjectNode root = loadStoreNode();
+        return buildAccounts(root);
+    }
+
+    private List<Account> buildAccounts(ObjectNode root) {
         List<Account> accounts = new ArrayList<>();
         TreeSet<String> teamNames = new TreeSet<>();
         root.with("teams").fieldNames().forEachRemaining(teamNames::add);
@@ -81,7 +91,7 @@ public class StoreService extends BaseSupport {
             );
             accounts.add(new Account(name, baseUrl, node.path("api_key").asText(""), node.path("model_name").asText(""), "", false, accountType));
         }
-        accounts.sort(Comparator.comparing(Account::isTeam).reversed().thenComparing(Account::getName, String.CASE_INSENSITIVE_ORDER));
+        sortAccounts(accounts, accountOrderIndex(root));
         return accounts;
     }
 
@@ -129,6 +139,58 @@ public class StoreService extends BaseSupport {
         saveStoreNode(root);
     }
 
+    public boolean moveAccount(Account account, int offset) throws IOException {
+        if (account == null || isBlank(account.getName()) || offset == 0) {
+            return false;
+        }
+        ObjectNode root = loadStoreNode();
+        List<String> order = buildEffectiveAccountOrder(root);
+        int index = order.indexOf(accountKey(account));
+        if (index < 0) {
+            return false;
+        }
+        int targetIndex = index + offset;
+        if (targetIndex < 0 || targetIndex >= order.size()) {
+            return false;
+        }
+        Collections.swap(order, index, targetIndex);
+        writeAccountOrder(root, order);
+        saveStoreNode(root);
+        return true;
+    }
+
+    public void renameAccount(Account account, String newName) throws IOException {
+        if (account == null || isBlank(account.getName())) {
+            return;
+        }
+        String originalName = trimToEmpty(account.getName());
+        String targetName = trimToEmpty(newName);
+        if (isBlank(targetName)) {
+            throw new IOException("账号名称不能为空");
+        }
+        if (originalName.equals(targetName)) {
+            return;
+        }
+        ObjectNode root = loadStoreNode();
+        ObjectNode source = account.isTeam() ? root.with("teams") : root.with("profiles");
+        if (!source.has(originalName)) {
+            throw new IOException("原账号不存在：" + originalName);
+        }
+        if (root.with("teams").has(targetName) || root.with("profiles").has(targetName)) {
+            throw new IOException("账号名称已存在：" + targetName);
+        }
+        JsonNode copied = source.get(originalName).deepCopy();
+        source.remove(originalName);
+        source.set(targetName, copied);
+        String oldKey = accountKey(originalName, account.isTeam());
+        String newKey = accountKey(targetName, account.isTeam());
+        if (root.path("active").asText("").equals(activeKey(originalName, account.isTeam()))) {
+            root.put("active", activeKey(targetName, account.isTeam()));
+        }
+        replaceAccountOrderKey(root, oldKey, newKey);
+        saveStoreNode(root);
+    }
+
     public int exportAccounts(Path target) throws IOException {
         AccountBatchExport payload = new AccountBatchExport();
         payload.format = "codex-switcher-accounts";
@@ -154,6 +216,7 @@ public class StoreService extends BaseSupport {
         ObjectNode root = loadStoreNode();
         root.with("profiles").removeAll();
         root.with("teams").removeAll();
+        root.putArray(ACCOUNT_ORDER);
         root.putNull("active");
         int imported = 0;
         int skipped = 0;
@@ -197,6 +260,7 @@ public class StoreService extends BaseSupport {
         } else {
             root.with("profiles").remove(account.getName());
         }
+        removeAccountOrderKey(root, accountKey(account));
         String active = root.path("active").asText("");
         String key = account.isTeam() ? "team:" + account.getName() : account.getName();
         if (active.equals(key)) {
@@ -340,6 +404,16 @@ public class StoreService extends BaseSupport {
         return isBlank(value) ? DEFAULT_ACCOUNT_TEST_MODEL : value;
     }
 
+    public void saveRestartCodexAfterAccountApply(boolean enabled) throws IOException {
+        ObjectNode root = loadStoreNode();
+        root.put(RESTART_CODEX_AFTER_ACCOUNT_APPLY, enabled);
+        saveStoreNode(root);
+    }
+
+    public boolean loadRestartCodexAfterAccountApply() {
+        return loadStoreNode().path(RESTART_CODEX_AFTER_ACCOUNT_APPLY).asBoolean(false);
+    }
+
     private void updateAuth(String apiKey, String orgId) throws IOException {
         var data = readJsonMap(AUTH_PATH);
         data.put("OPENAI_API_KEY", apiKey);
@@ -361,13 +435,13 @@ public class StoreService extends BaseSupport {
             lines.clear();
         }
 
-        var sectionPattern = java.util.regex.Pattern.compile("^\\s*\\[([^\\]]+)]\\s*$");
-        var providerPattern = java.util.regex.Pattern.compile("^\\s*model_provider\\s*=\\s*[\"']([^\"']+)[\"']");
-        var basePattern = java.util.regex.Pattern.compile("^\\s*base_url\\s*=");
+        var sectionPattern = Pattern.compile("^\\s*\\[([^\\]]+)]\\s*$");
+        var providerPattern = Pattern.compile("^\\s*model_provider\\s*=\\s*[\"']([^\"']+)[\"']");
+        var basePattern = Pattern.compile("^\\s*base_url\\s*=");
         String activeProvider = null;
         String currentSection = null;
-        var providerSections = new java.util.LinkedHashMap<String, Integer>();
-        var providerBaseUrls = new java.util.LinkedHashMap<String, Integer>();
+        var providerSections = new LinkedHashMap<String, Integer>();
+        var providerBaseUrls = new LinkedHashMap<String, Integer>();
         var providerOrder = new ArrayList<String>();
 
         for (int index = 0; index < lines.size(); index++) {
@@ -450,8 +524,8 @@ public class StoreService extends BaseSupport {
         if (lines.size() == 1 && lines.get(0).isEmpty()) {
             lines.clear();
         }
-        var sectionPattern = java.util.regex.Pattern.compile("^\\s*\\[([^\\]]+)]\\s*$");
-        var modelPattern = java.util.regex.Pattern.compile("^\\s*model\\s*=");
+        var sectionPattern = Pattern.compile("^\\s*\\[([^\\]]+)]\\s*$");
+        var modelPattern = Pattern.compile("^\\s*model\\s*=");
         Integer modelIndex = null;
         Integer firstSectionIndex = null;
         for (int index = 0; index < lines.size(); index++) {
@@ -490,6 +564,8 @@ public class StoreService extends BaseSupport {
             team.put("model_name", trimToEmpty(account.getModelName()));
             team.put("org_id", account.getOrgId());
             teams.set(account.getName(), team);
+            removeAccountOrderKey(root, accountKey(account.getName(), false));
+            ensureAccountOrderKey(root, accountKey(account));
         } else {
             teams.remove(account.getName());
             ObjectNode profile = JSON.createObjectNode();
@@ -498,7 +574,142 @@ public class StoreService extends BaseSupport {
             profile.put("model_name", trimToEmpty(account.getModelName()));
             profile.put("account_type", firstNonBlank(account.getAccountType(), "proxy"));
             profiles.set(account.getName(), profile);
+            removeAccountOrderKey(root, accountKey(account.getName(), true));
+            ensureAccountOrderKey(root, accountKey(account));
         }
+    }
+
+    private void sortAccounts(List<Account> accounts, Map<String, Integer> orderIndex) {
+        Comparator<Account> fallback = Comparator.comparing(Account::isTeam).reversed()
+            .thenComparing(Account::getName, String.CASE_INSENSITIVE_ORDER);
+        if (orderIndex.isEmpty()) {
+            accounts.sort(fallback);
+            return;
+        }
+        accounts.sort((left, right) -> {
+            Integer leftIndex = orderIndex.get(accountKey(left));
+            Integer rightIndex = orderIndex.get(accountKey(right));
+            if (leftIndex != null && rightIndex != null) {
+                return Integer.compare(leftIndex, rightIndex);
+            }
+            if (leftIndex != null) {
+                return -1;
+            }
+            if (rightIndex != null) {
+                return 1;
+            }
+            return fallback.compare(left, right);
+        });
+    }
+
+    private Map<String, Integer> accountOrderIndex(JsonNode root) {
+        Map<String, Integer> orderIndex = new LinkedHashMap<>();
+        JsonNode order = root.path(ACCOUNT_ORDER);
+        if (!order.isArray()) {
+            return orderIndex;
+        }
+        int index = 0;
+        for (JsonNode item : order) {
+            String key = trimToEmpty(item.asText(""));
+            if (!isBlank(key) && !orderIndex.containsKey(key)) {
+                orderIndex.put(key, index++);
+            }
+        }
+        return orderIndex;
+    }
+
+    private List<String> buildEffectiveAccountOrder(ObjectNode root) {
+        List<String> order = new ArrayList<>();
+        for (Account account : buildAccounts(root)) {
+            order.add(accountKey(account));
+        }
+        return order;
+    }
+
+    private void writeAccountOrder(ObjectNode root, List<String> order) {
+        ArrayNode array = root.putArray(ACCOUNT_ORDER);
+        for (String key : order) {
+            if (!isBlank(key)) {
+                array.add(key);
+            }
+        }
+    }
+
+    private void ensureAccountOrderKey(ObjectNode root, String key) {
+        if (isBlank(key)) {
+            return;
+        }
+        List<String> order = buildEffectiveAccountOrder(root);
+        if (!order.contains(key)) {
+            order.add(key);
+            writeAccountOrder(root, order);
+        } else if (root.path(ACCOUNT_ORDER).isArray()) {
+            writeAccountOrder(root, order);
+        }
+    }
+
+    private void removeAccountOrderKey(ObjectNode root, String key) {
+        if (!root.path(ACCOUNT_ORDER).isArray()) {
+            return;
+        }
+        List<String> order = buildEffectiveAccountOrder(root);
+        order.remove(key);
+        writeAccountOrder(root, order);
+    }
+
+    private void replaceAccountOrderKey(ObjectNode root, String oldKey, String newKey) {
+        List<String> order = rawAccountOrder(root);
+        int index = order.indexOf(oldKey);
+        if (index >= 0) {
+            order.set(index, newKey);
+        }
+        for (String key : buildEffectiveAccountOrder(root)) {
+            if (!order.contains(key)) {
+                order.add(key);
+            }
+        }
+        order.removeIf(key -> !accountExists(root, key));
+        writeAccountOrder(root, order);
+    }
+
+    private List<String> rawAccountOrder(ObjectNode root) {
+        List<String> order = new ArrayList<>();
+        JsonNode orderNode = root.path(ACCOUNT_ORDER);
+        if (!orderNode.isArray()) {
+            return order;
+        }
+        for (JsonNode item : orderNode) {
+            String key = trimToEmpty(item.asText(""));
+            if (!isBlank(key) && !order.contains(key)) {
+                order.add(key);
+            }
+        }
+        return order;
+    }
+
+    private boolean accountExists(ObjectNode root, String key) {
+        if (isBlank(key)) {
+            return false;
+        }
+        if (key.startsWith("team:")) {
+            return root.with("teams").has(key.substring(5));
+        }
+        if (key.startsWith("profile:")) {
+            return root.with("profiles").has(key.substring(8));
+        }
+        return false;
+    }
+
+    private String accountKey(Account account) {
+        return accountKey(account.getName(), account.isTeam());
+    }
+
+    private String accountKey(String name, boolean team) {
+        return (team ? "team:" : "profile:") + trimToEmpty(name);
+    }
+
+    private String activeKey(String name, boolean team) {
+        return team ? "team:" + trimToEmpty(name) : trimToEmpty(name);
     }
 
     private ParsedBatch parseBatch(JsonNode root) throws IOException {
@@ -564,6 +775,7 @@ public class StoreService extends BaseSupport {
                 accounts.add(new Account(name, baseUrl, node.path("api_key").asText(""), node.path("model_name").asText(""), "", false, accountType));
             });
         }
+        sortAccounts(accounts, accountOrderIndex(root));
         return accounts;
     }
 

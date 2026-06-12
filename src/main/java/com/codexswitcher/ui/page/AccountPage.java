@@ -7,6 +7,7 @@ import com.codexswitcher.ui.PagePane;
 import com.codexswitcher.ui.Ui;
 import javafx.collections.FXCollections;
 import javafx.geometry.Pos;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
@@ -24,7 +25,9 @@ import javafx.stage.FileChooser;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 public class AccountPage extends PagePane {
@@ -44,6 +47,7 @@ public class AccountPage extends PagePane {
     private final RadioButton teamRadio = new RadioButton("Team 账号");
     private final RadioButton officialRadio = new RadioButton("ChatGPT 官方账号");
     private final RadioButton proxyRadio = new RadioButton("中转账号");
+    private final CheckBox restartCodexCheckBox = new CheckBox("应用账号后重启 Codex");
     private final Label statusLabel = new Label();
     private final Map<String, ProbeState> probeStates = new LinkedHashMap<>();
 
@@ -89,6 +93,7 @@ public class AccountPage extends PagePane {
                 persistTestModelQuietly();
             }
         });
+        restartCodexCheckBox.selectedProperty().addListener((obs, oldValue, selected) -> persistRestartCodexSwitchQuietly(selected));
 
         GridPane form = new GridPane();
         form.setHgap(10);
@@ -120,6 +125,12 @@ public class AccountPage extends PagePane {
         deleteButton.setOnAction(event -> deleteSelected());
         var refreshButton = Ui.button("刷新");
         refreshButton.setOnAction(event -> loadAccounts());
+        var moveUpButton = Ui.button("上移");
+        moveUpButton.setOnAction(event -> moveSelected(-1));
+        var moveDownButton = Ui.button("下移");
+        moveDownButton.setOnAction(event -> moveSelected(1));
+        var renameButton = Ui.button("改名");
+        renameButton.setOnAction(event -> renameSelected());
         var exportButton = Ui.button("批量导出");
         exportButton.setOnAction(event -> exportAccounts());
         var importButton = Ui.button("批量导入");
@@ -133,9 +144,11 @@ public class AccountPage extends PagePane {
         var batchTestButton = Ui.button("批量检测全部");
         batchTestButton.setOnAction(event -> testAllAccounts());
 
-        VBox left = Ui.card("账号列表", listView, Ui.row(applyButton, deleteButton, refreshButton), Ui.row(exportButton, importButton));
+        VBox left = Ui.card("账号列表", listView, Ui.row(applyButton, deleteButton, refreshButton),
+            Ui.row(moveUpButton, moveDownButton, renameButton), Ui.row(exportButton, importButton));
         left.setPrefWidth(360);
-        VBox right = Ui.card("新增/更新账号", form, Ui.row(saveButton, clearButton, testButton, batchTestButton), statusLabel);
+        VBox right = Ui.card("新增/更新账号", form, restartCodexCheckBox,
+            Ui.row(saveButton, clearButton, testButton, batchTestButton), statusLabel);
         HBox body = new HBox(12, left, right);
         HBox.setHgrow(right, Priority.ALWAYS);
 
@@ -147,6 +160,7 @@ public class AccountPage extends PagePane {
     @Override
     public void onShow() {
         modelField.setText(context.services().store().loadAccountTestModel());
+        restartCodexCheckBox.setSelected(context.services().store().loadRestartCodexAfterAccountApply());
         loadAccounts();
     }
 
@@ -156,15 +170,20 @@ public class AccountPage extends PagePane {
     }
 
     private void loadAccounts() {
+        loadAccounts(null);
+    }
+
+    private void loadAccounts(Account preferredSelection) {
         context.runAsync(() -> new Object[]{context.services().store().buildAccounts(), context.services().store().getActiveAccount()}, result -> {
-            var accounts = (java.util.List<Account>) result[0];
+            var accounts = (List<Account>) result[0];
             Account active = (Account) result[1];
             context.state().setActiveAccount(active);
             listView.setItems(FXCollections.observableArrayList(accounts));
             refreshStateOnly();
-            if (active != null) {
+            Account selection = preferredSelection == null ? active : preferredSelection;
+            if (selection != null) {
                 accounts.stream()
-                    .filter(account -> account.getName().equals(active.getName()) && account.isTeam() == active.isTeam())
+                    .filter(account -> account.getName().equals(selection.getName()) && account.isTeam() == selection.isTeam())
                     .findFirst()
                     .ifPresent(account -> listView.getSelectionModel().select(account));
             }
@@ -206,7 +225,7 @@ public class AccountPage extends PagePane {
             context.services().store().applyAccountConfig(account);
             context.state().setActiveAccount(account);
             refreshStateOnly();
-            restartCodexAppAfterAccountApplied("账号已应用，正在重启 Codex...");
+            finishAccountApplied("账号已应用");
             context.refreshAll();
             context.navigateTo(CLOUD_SYNC_PAGE_KEY);
         } catch (Exception e) {
@@ -225,16 +244,75 @@ public class AccountPage extends PagePane {
             return;
         }
         try {
+            Account selected = listView.getSelectionModel().getSelectedItem();
+            if (selected != null && selected.isTeam() == account.isTeam() && !selected.getName().equals(account.getName())) {
+                context.services().store().renameAccount(selected, account.getName());
+            }
             context.services().store().upsertAccount(account);
             context.services().store().applyAccountConfig(account);
             context.state().setActiveAccount(account);
-            loadAccounts();
-            restartCodexAppAfterAccountApplied("账号已保存并应用，正在重启 Codex...");
+            loadAccounts(account);
+            finishAccountApplied("账号已保存并应用");
             context.refreshAll();
             context.navigateTo(CLOUD_SYNC_PAGE_KEY);
         } catch (Exception e) {
             Ui.error("失败", e.getMessage());
         }
+    }
+
+    private void moveSelected(int offset) {
+        Account account = listView.getSelectionModel().getSelectedItem();
+        if (account == null) {
+            Ui.warn("提示", "请选择账号");
+            return;
+        }
+        try {
+            boolean moved = context.services().store().moveAccount(account, offset);
+            if (!moved) {
+                statusLabel.setText(offset < 0 ? "已经是第一个账号" : "已经是最后一个账号");
+                return;
+            }
+            statusLabel.setText("已调整账号顺序：" + account.getName());
+            loadAccounts(account);
+            context.refreshAll();
+        } catch (Exception e) {
+            Ui.error("失败", e.getMessage());
+        }
+    }
+
+    private void renameSelected() {
+        Account account = listView.getSelectionModel().getSelectedItem();
+        if (account == null) {
+            Ui.warn("提示", "请选择账号");
+            return;
+        }
+        String newName = Ui.promptText("修改账号名称", "只修改展示名称，不会创建新账号", account.getName());
+        if (newName == null) {
+            return;
+        }
+        newName = newName.trim();
+        if (newName.isBlank()) {
+            Ui.warn("提示", "账号名称不能为空");
+            return;
+        }
+        try {
+            context.services().store().renameAccount(account, newName);
+            Account renamed = new Account(newName, account.getBaseUrl(), account.getApiKey(), account.getModelName(),
+                account.getOrgId(), account.isTeam(), account.getAccountType());
+            statusLabel.setText("已修改账号名称：" + newName);
+            loadAccounts(renamed);
+            context.refreshAll();
+        } catch (Exception e) {
+            Ui.error("失败", e.getMessage());
+        }
+    }
+
+    private void finishAccountApplied(String successText) {
+        if (!restartCodexCheckBox.isSelected()) {
+            statusLabel.setText(successText + "，未重启 Codex");
+            return;
+        }
+        restartCodexAppAfterAccountApplied(successText + "，正在重启 Codex...");
     }
 
     private void restartCodexAppAfterAccountApplied(String pendingText) {
@@ -292,7 +370,7 @@ public class AccountPage extends PagePane {
     }
 
     private void testAllAccounts() {
-        var accounts = new java.util.ArrayList<>(listView.getItems());
+        var accounts = new ArrayList<>(listView.getItems());
         if (accounts.isEmpty()) {
             Ui.warn("提示", "账号列表为空");
             return;
@@ -338,6 +416,13 @@ public class AccountPage extends PagePane {
         }
         try {
             context.services().store().saveAccountTestModel(value);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void persistRestartCodexSwitchQuietly(boolean selected) {
+        try {
+            context.services().store().saveRestartCodexAfterAccountApply(selected);
         } catch (Exception ignored) {
         }
     }
