@@ -77,7 +77,14 @@ public class AccountPage extends PagePane {
                 HBox.setHgrow(row.getChildren().get(1), Priority.ALWAYS);
                 setText(null);
                 setGraphic(row);
-                setTooltip(state.detail().isBlank() ? null : new Tooltip(state.detail()));
+                if (state.detail().isBlank()) {
+                    setTooltip(null);
+                } else {
+                    Tooltip tooltip = new Tooltip(state.detail());
+                    tooltip.setWrapText(true);
+                    tooltip.setMaxWidth(760);
+                    setTooltip(tooltip);
+                }
             }
         });
         listView.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, newValue) -> populate(newValue));
@@ -121,22 +128,22 @@ public class AccountPage extends PagePane {
 
         var applyButton = Ui.button("应用账号");
         applyButton.setOnAction(event -> applySelected());
-        var deleteButton = Ui.button("删除账号");
-        deleteButton.setOnAction(event -> deleteSelected());
         var refreshButton = Ui.button("刷新");
         refreshButton.setOnAction(event -> loadAccounts());
         var moveUpButton = Ui.button("上移");
         moveUpButton.setOnAction(event -> moveSelected(-1));
         var moveDownButton = Ui.button("下移");
         moveDownButton.setOnAction(event -> moveSelected(1));
-        var renameButton = Ui.button("改名");
-        renameButton.setOnAction(event -> renameSelected());
         var exportButton = Ui.button("批量导出");
         exportButton.setOnAction(event -> exportAccounts());
         var importButton = Ui.button("批量导入");
         importButton.setOnAction(event -> importAccounts());
-        var saveButton = Ui.button("保存/更新");
-        saveButton.setOnAction(event -> saveAccount());
+        var addButton = Ui.button("新增账号");
+        addButton.setOnAction(event -> addAccount());
+        var updateButton = Ui.button("修改账号");
+        updateButton.setOnAction(event -> updateAccount());
+        var deleteButton = Ui.button("删除账号");
+        deleteButton.setOnAction(event -> deleteSelected());
         var clearButton = Ui.button("清空");
         clearButton.setOnAction(event -> clearForm());
         var testButton = Ui.button("账号检测");
@@ -144,11 +151,11 @@ public class AccountPage extends PagePane {
         var batchTestButton = Ui.button("批量检测全部");
         batchTestButton.setOnAction(event -> testAllAccounts());
 
-        VBox left = Ui.card("账号列表", listView, Ui.row(applyButton, deleteButton, refreshButton),
-            Ui.row(moveUpButton, moveDownButton, renameButton), Ui.row(exportButton, importButton));
+        VBox left = Ui.card("账号列表", listView, Ui.row(applyButton, refreshButton),
+            Ui.row(moveUpButton, moveDownButton), Ui.row(exportButton, importButton));
         left.setPrefWidth(360);
-        VBox right = Ui.card("新增/更新账号", form, restartCodexCheckBox,
-            Ui.row(saveButton, clearButton, testButton, batchTestButton), statusLabel);
+        VBox right = Ui.card("账号维护", form, restartCodexCheckBox,
+            Ui.row(addButton, updateButton, deleteButton, clearButton), Ui.row(testButton, batchTestButton), statusLabel);
         HBox body = new HBox(12, left, right);
         HBox.setHgrow(right, Priority.ALWAYS);
 
@@ -227,34 +234,57 @@ public class AccountPage extends PagePane {
             refreshStateOnly();
             finishAccountApplied("账号已应用");
             context.refreshAll();
-            context.navigateTo(CLOUD_SYNC_PAGE_KEY);
         } catch (Exception e) {
             Ui.error("失败", e.getMessage());
         }
     }
 
-    private void saveAccount() {
+    private void addAccount() {
         Account account = buildFormAccount();
-        if (account.getName().isBlank() || account.getBaseUrl().isBlank() || account.getApiKey().isBlank()) {
-            Ui.warn("提示", "名称、Base URL、API Key 不能为空");
+        if (!validateAccountForm(account)) {
             return;
         }
-        if (account.isTeam() && account.getOrgId().isBlank()) {
-            Ui.warn("提示", "Team 账号需要填写 Org ID");
+        if (findAccount(account.getName(), account.isTeam()) != null) {
+            Ui.warn("提示", "账号已存在，请使用“修改账号”");
             return;
         }
         try {
-            Account selected = listView.getSelectionModel().getSelectedItem();
-            if (selected != null && selected.isTeam() == account.isTeam() && !selected.getName().equals(account.getName())) {
+            context.services().store().upsertAccount(account);
+            context.services().store().applyAccountConfig(account);
+            context.state().setActiveAccount(account);
+            loadAccounts(account);
+            finishAccountApplied("账号已新增并应用");
+            context.refreshAll();
+        } catch (Exception e) {
+            Ui.error("失败", e.getMessage());
+        }
+    }
+
+    private void updateAccount() {
+        Account selected = listView.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            Ui.warn("提示", "请选择需要修改的账号");
+            return;
+        }
+        Account account = buildFormAccount();
+        if (!validateAccountForm(account)) {
+            return;
+        }
+        try {
+            Account duplicated = findAccount(account.getName(), account.isTeam());
+            if (duplicated != null && !(selected.getName().equals(duplicated.getName()) && selected.isTeam() == duplicated.isTeam())) {
+                Ui.warn("提示", "账号名称已存在，请更换名称");
+                return;
+            }
+            if (selected.isTeam() == account.isTeam() && !selected.getName().equals(account.getName())) {
                 context.services().store().renameAccount(selected, account.getName());
             }
             context.services().store().upsertAccount(account);
             context.services().store().applyAccountConfig(account);
             context.state().setActiveAccount(account);
             loadAccounts(account);
-            finishAccountApplied("账号已保存并应用");
+            finishAccountApplied("账号已修改并应用");
             context.refreshAll();
-            context.navigateTo(CLOUD_SYNC_PAGE_KEY);
         } catch (Exception e) {
             Ui.error("失败", e.getMessage());
         }
@@ -274,33 +304,6 @@ public class AccountPage extends PagePane {
             }
             statusLabel.setText("已调整账号顺序：" + account.getName());
             loadAccounts(account);
-            context.refreshAll();
-        } catch (Exception e) {
-            Ui.error("失败", e.getMessage());
-        }
-    }
-
-    private void renameSelected() {
-        Account account = listView.getSelectionModel().getSelectedItem();
-        if (account == null) {
-            Ui.warn("提示", "请选择账号");
-            return;
-        }
-        String newName = Ui.promptText("修改账号名称", "只修改展示名称，不会创建新账号", account.getName());
-        if (newName == null) {
-            return;
-        }
-        newName = newName.trim();
-        if (newName.isBlank()) {
-            Ui.warn("提示", "账号名称不能为空");
-            return;
-        }
-        try {
-            context.services().store().renameAccount(account, newName);
-            Account renamed = new Account(newName, account.getBaseUrl(), account.getApiKey(), account.getModelName(),
-                account.getOrgId(), account.isTeam(), account.getAccountType());
-            statusLabel.setText("已修改账号名称：" + newName);
-            loadAccounts(renamed);
             context.refreshAll();
         } catch (Exception e) {
             Ui.error("失败", e.getMessage());
@@ -355,6 +358,28 @@ public class AccountPage extends PagePane {
         accountModelField.clear();
         orgField.clear();
         proxyRadio.setSelected(true);
+    }
+
+    private boolean validateAccountForm(Account account) {
+        if (account.getName().isBlank() || account.getBaseUrl().isBlank() || account.getApiKey().isBlank()) {
+            Ui.warn("提示", "名称、Base URL、API Key 不能为空");
+            return false;
+        }
+        if (account.isTeam() && account.getOrgId().isBlank()) {
+            Ui.warn("提示", "Team 账号需要填写 Org ID");
+            return false;
+        }
+        return true;
+    }
+
+    private Account findAccount(String name, boolean team) {
+        if (name == null || name.isBlank()) {
+            return null;
+        }
+        return listView.getItems().stream()
+            .filter(account -> account.isTeam() == team && name.equals(account.getName()))
+            .findFirst()
+            .orElse(null);
     }
 
     private void testAccount() {
