@@ -1,8 +1,10 @@
 package com.codexswitcher.app;
 
 import com.codexswitcher.service.AppServices;
+import com.codexswitcher.ui.MacTrayController;
 import com.codexswitcher.ui.MainView;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.scene.Scene;
 import javafx.scene.image.Image;
 import javafx.stage.Stage;
@@ -12,6 +14,7 @@ import java.io.InputStream;
 public class CodexSwitcherApplication extends Application {
 
     private MainView mainView;
+    private MacTrayController trayController;
 
     @Override
     public void start(Stage stage) {
@@ -39,11 +42,22 @@ public class CodexSwitcherApplication extends Application {
         } catch (Exception ignored) {
         }
         stage.setScene(scene);
+        trayController = new MacTrayController(stage, services);
+        if (trayController.start()) {
+            Platform.setImplicitExit(false);
+            stage.setOnCloseRequest(event -> {
+                event.consume();
+                stage.hide();
+            });
+        }
         stage.show();
     }
 
     @Override
     public void stop() {
+        if (trayController != null) {
+            trayController.shutdown();
+        }
         if (mainView != null) {
             mainView.shutdown();
         }

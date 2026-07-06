@@ -13,6 +13,7 @@ public class AppServices {
     private final SessionService sessionService = new SessionService();
     private final UpdateService updateService = new UpdateService();
     private final OpenAiStatusService openAiStatusService = new OpenAiStatusService();
+    private final UsageService usageService = new UsageService(storeService);
 
     public StoreService store() {
         return storeService;
@@ -56,5 +57,9 @@ public class AppServices {
 
     public OpenAiStatusService openAiStatus() {
         return openAiStatusService;
+    }
+
+    public UsageService usage() {
+        return usageService;
     }
 }

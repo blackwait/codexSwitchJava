@@ -5,7 +5,7 @@
 
     <groupId>com.codexswitcher</groupId>
     <artifactId>codex-switcher-javafx</artifactId>
-    <version>1.0.2</version>
+    <version>1.0.3</version>
     <name>Codex Switcher JavaFX</name>
 
     <properties>
