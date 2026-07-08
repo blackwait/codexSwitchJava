@@ -10,14 +10,18 @@ import javafx.scene.image.Image;
 import javafx.stage.Stage;
 
 import java.io.InputStream;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 public class CodexSwitcherApplication extends Application {
 
+    private Stage primaryStage;
     private MainView mainView;
     private MacTrayController trayController;
 
     @Override
     public void start(Stage stage) {
+        primaryStage = stage;
         AppState state = new AppState();
         AppServices services = new AppServices();
         try {
@@ -42,21 +46,19 @@ public class CodexSwitcherApplication extends Application {
         } catch (Exception ignored) {
         }
         stage.setScene(scene);
-        trayController = new MacTrayController(stage, services);
-        if (trayController.start()) {
-            Platform.setImplicitExit(false);
-            stage.setOnCloseRequest(event -> {
-                event.consume();
-                stage.hide();
-            });
+        trayController = new MacTrayController(stage, services, () -> requestApplicationQuit(services, "Tray Quit"));
+        boolean trayStarted = trayController.start();
+        if (trayStarted) {
+            MacDesktopIntegration.configureTrayWindow(stage);
         }
+        MacDesktopIntegration.install(stage, trayController, services, () -> requestApplicationQuit(services, "Desktop QuitHandler"));
         stage.show();
     }
 
     @Override
     public void stop() {
         if (trayController != null) {
-            trayController.shutdown();
+            trayController.shutdownSync();
         }
         if (mainView != null) {
             mainView.shutdown();
@@ -65,5 +67,36 @@ public class CodexSwitcherApplication extends Application {
 
     public static void main(String[] args) {
         launch(args);
+    }
+
+    private void requestApplicationQuit(AppServices services, String reason) {
+        services.store().logLine("应用退出", reason);
+        Thread quitThread = new Thread(() -> {
+            try {
+                if (trayController != null) {
+                    trayController.shutdownSync();
+                }
+                CountDownLatch latch = new CountDownLatch(1);
+                Platform.runLater(() -> {
+                    try {
+                        if (mainView != null) {
+                            mainView.shutdown();
+                        }
+                        Platform.exit();
+                    } finally {
+                        latch.countDown();
+                    }
+                });
+                if (!latch.await(2, TimeUnit.SECONDS)) {
+                    services.store().logLine("JavaFX 退出超时", reason);
+                }
+            } catch (Exception e) {
+                services.store().logLine("退出失败", e.getMessage());
+            } finally {
+                System.exit(0);
+            }
+        }, "codex-quit");
+        quitThread.setDaemon(true);
+        quitThread.start();
     }
 }

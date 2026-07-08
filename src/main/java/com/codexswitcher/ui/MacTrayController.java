@@ -31,6 +31,7 @@ public class MacTrayController {
 
     private final Stage stage;
     private final AppServices services;
+    private final Runnable quitAction;
     private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "codex-usage-tray");
         thread.setDaemon(true);
@@ -47,9 +48,10 @@ public class MacTrayController {
     private MenuItem weeklyItem;
     private MenuItem updatedItem;
 
-    public MacTrayController(Stage stage, AppServices services) {
+    public MacTrayController(Stage stage, AppServices services, Runnable quitAction) {
         this.stage = stage;
         this.services = services;
+        this.quitAction = quitAction;
     }
 
     public boolean start() {
@@ -60,7 +62,7 @@ public class MacTrayController {
         PopupMenu menu = buildMenu();
         trayIcon = new TrayIcon(renderStatusImage("Usage ...", true), "Codex Usage", menu);
         trayIcon.setImageAutoSize(false);
-        trayIcon.addActionListener(event -> openMainWindow());
+        trayIcon.addActionListener(event -> showMainWindow());
         try {
             tray.add(trayIcon);
         } catch (AWTException e) {
@@ -73,9 +75,34 @@ public class MacTrayController {
     }
 
     public void shutdown() {
+        shutdownSync();
+    }
+
+    public void shutdownSync() {
         executor.shutdownNow();
-        if (tray != null && trayIcon != null) {
-            tray.remove(trayIcon);
+        TrayIcon icon = trayIcon;
+        trayIcon = null;
+        if (tray == null || icon == null) {
+            return;
+        }
+        Runnable remove = () -> {
+            try {
+                tray.remove(icon);
+            } catch (Exception ignored) {
+            }
+        };
+        try {
+            if (EventQueue.isDispatchThread()) {
+                remove.run();
+            } else {
+                EventQueue.invokeAndWait(remove);
+            }
+        } catch (Exception e) {
+            services.store().logLine("移除菜单栏图标失败", e.getMessage());
+            try {
+                EventQueue.invokeLater(remove);
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -90,7 +117,7 @@ public class MacTrayController {
         MenuItem refreshItem = new MenuItem("刷新");
         refreshItem.addActionListener(event -> refreshAsync());
         MenuItem openItem = new MenuItem("打开主窗口");
-        openItem.addActionListener(event -> openMainWindow());
+        openItem.addActionListener(event -> showMainWindow());
         MenuItem quitItem = new MenuItem("退出");
         quitItem.addActionListener(event -> quit());
 
@@ -232,7 +259,7 @@ public class MacTrayController {
         return image;
     }
 
-    private void openMainWindow() {
+    public void showMainWindow() {
         Platform.runLater(() -> {
             if (stage.isIconified()) {
                 stage.setIconified(false);
@@ -244,10 +271,6 @@ public class MacTrayController {
     }
 
     private void quit() {
-        shutdown();
-        Platform.runLater(() -> {
-            Platform.setImplicitExit(true);
-            Platform.exit();
-        });
+        quitAction.run();
     }
 }

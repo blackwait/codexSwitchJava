@@ -32,7 +32,6 @@ import java.util.Map;
 
 public class AccountPage extends PagePane {
 
-    private static final String CLOUD_SYNC_PAGE_KEY = "cloud_sync";
     private static final String DEFAULT_TEST_MODEL = "gpt-5.3-codex";
     private static final int PROBE_TIMEOUT_SECONDS = 30;
 
@@ -241,11 +240,16 @@ public class AccountPage extends PagePane {
 
     private void addAccount() {
         Account account = buildFormAccount();
+        Account selected = listView.getSelectionModel().getSelectedItem();
+        if (selected != null && matchesIdentity(selected, account)) {
+            prepareAddMode();
+            return;
+        }
         if (!validateAccountForm(account)) {
             return;
         }
         if (findAccount(account.getName(), account.isTeam()) != null) {
-            Ui.warn("提示", "账号已存在，请使用“修改账号”");
+            Ui.warn("提示", "账号名称「" + account.getName() + "」已存在，请更换名称或使用“修改账号”");
             return;
         }
         try {
@@ -258,6 +262,17 @@ public class AccountPage extends PagePane {
         } catch (Exception e) {
             Ui.error("失败", e.getMessage());
         }
+    }
+
+    private void prepareAddMode() {
+        clearForm();
+        listView.getSelectionModel().clearSelection();
+        statusLabel.setText("已切换为新增模式，请填写账号信息后再次点击“新增账号”");
+        nameField.requestFocus();
+    }
+
+    private boolean matchesIdentity(Account left, Account right) {
+        return left.getName().equals(right.getName()) && left.isTeam() == right.isTeam();
     }
 
     private void updateAccount() {
