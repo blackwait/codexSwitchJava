@@ -61,6 +61,8 @@ JPACKAGE_ARGS=(
   --main-jar "$MAIN_JAR"
   --main-class "$MAIN_CLASS"
   --java-options "--enable-native-access=ALL-UNNAMED"
+  --java-options "--add-opens"
+  --java-options "java.desktop/com.apple.eawt=ALL-UNNAMED"
   --java-options "-Djavafx.cachedir=$JAVA_FX_CACHE"
 )
 
@@ -75,6 +77,8 @@ DMG_ARGS=(
   --main-jar "$MAIN_JAR"
   --main-class "$MAIN_CLASS"
   --java-options "--enable-native-access=ALL-UNNAMED"
+  --java-options "--add-opens"
+  --java-options "java.desktop/com.apple.eawt=ALL-UNNAMED"
   --java-options "-Djavafx.cachedir=$JAVA_FX_CACHE"
 )
 

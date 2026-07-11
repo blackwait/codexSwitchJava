@@ -222,13 +222,6 @@ jobs:
           tar -C dist -czf "$ARCHIVE" "CodexSwitcher"
           echo "ARCHIVE_PATH=$ARCHIVE" >> "$GITHUB_ENV"
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: CodexSwitcher-${{ matrix.name }}-${{ env.APP_VERSION }}
-          path: ${{ env.ARCHIVE_PATH }}
-          if-no-files-found: error
-
       - name: Publish GitHub Release assets
         if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
         uses: softprops/action-gh-release@v2
@@ -237,3 +230,12 @@ jobs:
           files: ${{ env.ARCHIVE_PATH }}
           fail_on_unmatched_files: true
           overwrite_files: true
+
+      - name: Upload artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') && !(github.event_name == 'workflow_dispatch' && inputs.publish_release) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodexSwitcher-${{ matrix.name }}-${{ env.APP_VERSION }}
+          path: ${{ env.ARCHIVE_PATH }}
+          retention-days: 3
+          if-no-files-found: error

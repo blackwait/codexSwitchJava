@@ -30,7 +30,11 @@ public class MainView extends BorderPane {
 
     private static final String CLOUD_SYNC_KEY = "cloud_sync";
 
-    private final ExecutorService executor = Executors.newCachedThreadPool();
+    private final ExecutorService executor = Executors.newCachedThreadPool(runnable -> {
+        Thread thread = new Thread(runnable, "codex-main-worker");
+        thread.setDaemon(true);
+        return thread;
+    });
     private final Map<String, PagePane> pages = new HashMap<>();
     private final Map<String, ToggleButton> buttons = new HashMap<>();
     private final ToggleGroup navGroup = new ToggleGroup();

@@ -7,6 +7,7 @@ import com.codexswitcher.ui.PagePane;
 import com.codexswitcher.ui.Ui;
 import javafx.collections.FXCollections;
 import javafx.geometry.Pos;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
@@ -24,12 +25,13 @@ import javafx.stage.FileChooser;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 public class AccountPage extends PagePane {
 
-    private static final String CLOUD_SYNC_PAGE_KEY = "cloud_sync";
     private static final String DEFAULT_TEST_MODEL = "gpt-5.3-codex";
     private static final int PROBE_TIMEOUT_SECONDS = 30;
 
@@ -44,6 +46,7 @@ public class AccountPage extends PagePane {
     private final RadioButton teamRadio = new RadioButton("Team 账号");
     private final RadioButton officialRadio = new RadioButton("ChatGPT 官方账号");
     private final RadioButton proxyRadio = new RadioButton("中转账号");
+    private final CheckBox restartCodexCheckBox = new CheckBox("应用账号后重启 Codex");
     private final Label statusLabel = new Label();
     private final Map<String, ProbeState> probeStates = new LinkedHashMap<>();
 
@@ -73,7 +76,14 @@ public class AccountPage extends PagePane {
                 HBox.setHgrow(row.getChildren().get(1), Priority.ALWAYS);
                 setText(null);
                 setGraphic(row);
-                setTooltip(state.detail().isBlank() ? null : new Tooltip(state.detail()));
+                if (state.detail().isBlank()) {
+                    setTooltip(null);
+                } else {
+                    Tooltip tooltip = new Tooltip(state.detail());
+                    tooltip.setWrapText(true);
+                    tooltip.setMaxWidth(760);
+                    setTooltip(tooltip);
+                }
             }
         });
         listView.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, newValue) -> populate(newValue));
@@ -89,6 +99,7 @@ public class AccountPage extends PagePane {
                 persistTestModelQuietly();
             }
         });
+        restartCodexCheckBox.selectedProperty().addListener((obs, oldValue, selected) -> persistRestartCodexSwitchQuietly(selected));
 
         GridPane form = new GridPane();
         form.setHgap(10);
@@ -116,16 +127,22 @@ public class AccountPage extends PagePane {
 
         var applyButton = Ui.button("应用账号");
         applyButton.setOnAction(event -> applySelected());
-        var deleteButton = Ui.button("删除账号");
-        deleteButton.setOnAction(event -> deleteSelected());
         var refreshButton = Ui.button("刷新");
         refreshButton.setOnAction(event -> loadAccounts());
+        var moveUpButton = Ui.button("上移");
+        moveUpButton.setOnAction(event -> moveSelected(-1));
+        var moveDownButton = Ui.button("下移");
+        moveDownButton.setOnAction(event -> moveSelected(1));
         var exportButton = Ui.button("批量导出");
         exportButton.setOnAction(event -> exportAccounts());
         var importButton = Ui.button("批量导入");
         importButton.setOnAction(event -> importAccounts());
-        var saveButton = Ui.button("保存/更新");
-        saveButton.setOnAction(event -> saveAccount());
+        var addButton = Ui.button("新增账号");
+        addButton.setOnAction(event -> addAccount());
+        var updateButton = Ui.button("修改账号");
+        updateButton.setOnAction(event -> updateAccount());
+        var deleteButton = Ui.button("删除账号");
+        deleteButton.setOnAction(event -> deleteSelected());
         var clearButton = Ui.button("清空");
         clearButton.setOnAction(event -> clearForm());
         var testButton = Ui.button("账号检测");
@@ -133,20 +150,23 @@ public class AccountPage extends PagePane {
         var batchTestButton = Ui.button("批量检测全部");
         batchTestButton.setOnAction(event -> testAllAccounts());
 
-        VBox left = Ui.card("账号列表", listView, Ui.row(applyButton, deleteButton, refreshButton), Ui.row(exportButton, importButton));
+        VBox left = Ui.card("账号列表", listView, Ui.row(applyButton, refreshButton),
+            Ui.row(moveUpButton, moveDownButton), Ui.row(exportButton, importButton));
         left.setPrefWidth(360);
-        VBox right = Ui.card("新增/更新账号", form, Ui.row(saveButton, clearButton, testButton, batchTestButton), statusLabel);
+        VBox right = Ui.card("账号维护", form, restartCodexCheckBox,
+            Ui.row(addButton, updateButton, deleteButton, clearButton), Ui.row(testButton, batchTestButton), statusLabel);
         HBox body = new HBox(12, left, right);
         HBox.setHgrow(right, Priority.ALWAYS);
 
         root.getChildren().addAll(body, Ui.card("说明",
-            new Label("保存/更新只维护本地账号列表；应用账号才会写入 ~/.codex 下的 config.toml、auth.json 与激活账号指针。"),
+            new Label("保存后会自动写入 ~/.codex 下的 config.toml、auth.json 与激活账号指针。"),
             new Label("批量导入/导出使用 JSON 文件，导入时会全量替换本地账号列表。")));
     }
 
     @Override
     public void onShow() {
         modelField.setText(context.services().store().loadAccountTestModel());
+        restartCodexCheckBox.setSelected(context.services().store().loadRestartCodexAfterAccountApply());
         loadAccounts();
     }
 
@@ -156,15 +176,20 @@ public class AccountPage extends PagePane {
     }
 
     private void loadAccounts() {
+        loadAccounts(null);
+    }
+
+    private void loadAccounts(Account preferredSelection) {
         context.runAsync(() -> new Object[]{context.services().store().buildAccounts(), context.services().store().getActiveAccount()}, result -> {
-            var accounts = (java.util.List<Account>) result[0];
+            var accounts = (List<Account>) result[0];
             Account active = (Account) result[1];
             context.state().setActiveAccount(active);
             listView.setItems(FXCollections.observableArrayList(accounts));
             refreshStateOnly();
-            if (active != null) {
+            Account selection = preferredSelection == null ? active : preferredSelection;
+            if (selection != null) {
                 accounts.stream()
-                    .filter(account -> account.getName().equals(active.getName()) && account.isTeam() == active.isTeam())
+                    .filter(account -> account.getName().equals(selection.getName()) && account.isTeam() == selection.isTeam())
                     .findFirst()
                     .ifPresent(account -> listView.getSelectionModel().select(account));
             }
@@ -206,33 +231,121 @@ public class AccountPage extends PagePane {
             context.services().store().applyAccountConfig(account);
             context.state().setActiveAccount(account);
             refreshStateOnly();
-            statusLabel.setText("账号已应用");
+            finishAccountApplied("账号已应用");
             context.refreshAll();
-            context.navigateTo(CLOUD_SYNC_PAGE_KEY);
         } catch (Exception e) {
             Ui.error("失败", e.getMessage());
         }
     }
 
-    private void saveAccount() {
+    private void addAccount() {
         Account account = buildFormAccount();
-        if (account.getName().isBlank() || account.getBaseUrl().isBlank() || account.getApiKey().isBlank()) {
-            Ui.warn("提示", "名称、Base URL、API Key 不能为空");
+        Account selected = listView.getSelectionModel().getSelectedItem();
+        if (selected != null && matchesIdentity(selected, account)) {
+            prepareAddMode();
             return;
         }
-        if (account.isTeam() && account.getOrgId().isBlank()) {
-            Ui.warn("提示", "Team 账号需要填写 Org ID");
+        if (!validateAccountForm(account)) {
+            return;
+        }
+        if (findAccount(account.getName(), account.isTeam()) != null) {
+            Ui.warn("提示", "账号名称「" + account.getName() + "」已存在，请更换名称或使用“修改账号”");
             return;
         }
         try {
-            Account selectedAccount = listView.getSelectionModel().getSelectedItem();
-            context.services().store().saveAccount(selectedAccount, account);
-            loadAccounts();
+            context.services().store().upsertAccount(account);
+            context.services().store().applyAccountConfig(account);
+            context.state().setActiveAccount(account);
+            loadAccounts(account);
+            finishAccountApplied("账号已新增并应用");
             context.refreshAll();
-            statusLabel.setText("账号已保存");
         } catch (Exception e) {
             Ui.error("失败", e.getMessage());
         }
+    }
+
+    private void prepareAddMode() {
+        clearForm();
+        listView.getSelectionModel().clearSelection();
+        statusLabel.setText("已切换为新增模式，请填写账号信息后再次点击“新增账号”");
+        nameField.requestFocus();
+    }
+
+    private boolean matchesIdentity(Account left, Account right) {
+        return left.getName().equals(right.getName()) && left.isTeam() == right.isTeam();
+    }
+
+    private void updateAccount() {
+        Account selected = listView.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            Ui.warn("提示", "请选择需要修改的账号");
+            return;
+        }
+        Account account = buildFormAccount();
+        if (!validateAccountForm(account)) {
+            return;
+        }
+        try {
+            Account duplicated = findAccount(account.getName(), account.isTeam());
+            if (duplicated != null && !(selected.getName().equals(duplicated.getName()) && selected.isTeam() == duplicated.isTeam())) {
+                Ui.warn("提示", "账号名称已存在，请更换名称");
+                return;
+            }
+            if (selected.isTeam() == account.isTeam() && !selected.getName().equals(account.getName())) {
+                context.services().store().renameAccount(selected, account.getName());
+            }
+            context.services().store().upsertAccount(account);
+            context.services().store().applyAccountConfig(account);
+            context.state().setActiveAccount(account);
+            loadAccounts(account);
+            finishAccountApplied("账号已修改并应用");
+            context.refreshAll();
+        } catch (Exception e) {
+            Ui.error("失败", e.getMessage());
+        }
+    }
+
+    private void moveSelected(int offset) {
+        Account account = listView.getSelectionModel().getSelectedItem();
+        if (account == null) {
+            Ui.warn("提示", "请选择账号");
+            return;
+        }
+        try {
+            boolean moved = context.services().store().moveAccount(account, offset);
+            if (!moved) {
+                statusLabel.setText(offset < 0 ? "已经是第一个账号" : "已经是最后一个账号");
+                return;
+            }
+            statusLabel.setText("已调整账号顺序：" + account.getName());
+            loadAccounts(account);
+            context.refreshAll();
+        } catch (Exception e) {
+            Ui.error("失败", e.getMessage());
+        }
+    }
+
+    private void finishAccountApplied(String successText) {
+        if (!restartCodexCheckBox.isSelected()) {
+            statusLabel.setText(successText + "，未重启 Codex");
+            return;
+        }
+        restartCodexAppAfterAccountApplied(successText + "，正在重启 Codex...");
+    }
+
+    private void restartCodexAppAfterAccountApplied(String pendingText) {
+        statusLabel.setText(pendingText);
+        context.runAsync(
+            () -> {
+                context.services().codex().restartCodexApp();
+                return null;
+            },
+            ignored -> statusLabel.setText("账号已应用，Codex 已重启"),
+            error -> {
+                statusLabel.setText("账号已应用，但 Codex 重启失败：" + error.getMessage());
+                Ui.error("Codex 重启失败", error.getMessage());
+            }
+        );
     }
 
     private void deleteSelected() {
@@ -262,6 +375,28 @@ public class AccountPage extends PagePane {
         proxyRadio.setSelected(true);
     }
 
+    private boolean validateAccountForm(Account account) {
+        if (account.getName().isBlank() || account.getBaseUrl().isBlank() || account.getApiKey().isBlank()) {
+            Ui.warn("提示", "名称、Base URL、API Key 不能为空");
+            return false;
+        }
+        if (account.isTeam() && account.getOrgId().isBlank()) {
+            Ui.warn("提示", "Team 账号需要填写 Org ID");
+            return false;
+        }
+        return true;
+    }
+
+    private Account findAccount(String name, boolean team) {
+        if (name == null || name.isBlank()) {
+            return null;
+        }
+        return listView.getItems().stream()
+            .filter(account -> account.isTeam() == team && name.equals(account.getName()))
+            .findFirst()
+            .orElse(null);
+    }
+
     private void testAccount() {
         Account account = buildFormAccount();
         persistTestModelQuietly();
@@ -275,7 +410,7 @@ public class AccountPage extends PagePane {
     }
 
     private void testAllAccounts() {
-        var accounts = new java.util.ArrayList<>(listView.getItems());
+        var accounts = new ArrayList<>(listView.getItems());
         if (accounts.isEmpty()) {
             Ui.warn("提示", "账号列表为空");
             return;
@@ -321,6 +456,13 @@ public class AccountPage extends PagePane {
         }
         try {
             context.services().store().saveAccountTestModel(value);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void persistRestartCodexSwitchQuietly(boolean selected) {
+        try {
+            context.services().store().saveRestartCodexAfterAccountApply(selected);
         } catch (Exception ignored) {
         }
     }

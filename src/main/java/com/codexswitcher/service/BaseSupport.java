@@ -34,7 +34,7 @@ import java.util.regex.Pattern;
 public abstract class BaseSupport {
 
     public static final String APP_TITLE = "Codex Switcher";
-    public static final String APP_VERSION = "1.0.2";
+    public static final String APP_VERSION = "1.0.4";
     public static final String APP_REPO = "nkosi-fang/CodexSwitcher";
     public static final Path CODEX_DIR = Path.of(System.getProperty("user.home"), ".codex");
     public static final Path PROFILE_STORE = CODEX_DIR.resolve("codex_profiles.json");

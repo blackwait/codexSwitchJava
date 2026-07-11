@@ -5,7 +5,7 @@
 
     <groupId>com.codexswitcher</groupId>
     <artifactId>codex-switcher-javafx</artifactId>
-    <version>1.0.2</version>
+    <version>1.0.4</version>
     <name>Codex Switcher JavaFX</name>
 
     <properties>
@@ -112,6 +112,8 @@
                     <mainClass>${main.class}</mainClass>
                     <options>
                         <option>--enable-native-access=ALL-UNNAMED</option>
+                        <option>--add-opens</option>
+                        <option>java.desktop/com.apple.eawt=ALL-UNNAMED</option>
                         <option>-Djavafx.cachedir=${javafx.cache.dir}</option>
                     </options>
                 </configuration>
